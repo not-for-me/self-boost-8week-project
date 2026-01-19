@@ -1,0 +1,24 @@
+[project]
+name = "train-data-collector"
+version = "0.1.0"
+description = "증권사 종목분석 리포트 PDF 수집기"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "httpx>=0.27.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "respx>=0.21.0",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "e2e: marks tests as end-to-end (may access external services)",
+]
+pythonpath = ["."]
