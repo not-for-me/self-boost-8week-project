@@ -7,7 +7,12 @@ import click
 from rich.console import Console
 
 from src.analyzer import PDFAnalyzer
-from src.formatters import format_document_info, format_page_analysis
+from src.formatters import (
+    format_document_info,
+    format_page_analysis,
+    format_table_summary,
+    format_tables,
+)
 
 console = Console()
 
@@ -80,6 +85,76 @@ def page(pdf_file: Path, page: int, element: str | None, limit: int):
         analyzer = PDFAnalyzer(pdf_file)
         analysis = analyzer.analyze_page(page)
         format_page_analysis(analysis, console, element=element, limit=limit)
+    except FileNotFoundError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        sys.exit(1)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Error analyzing PDF:[/red] {e}")
+        sys.exit(1)
+
+
+@cli.command()
+@click.argument("pdf_file", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--page", "-p",
+    type=int,
+    default=None,
+    help="Specific page to analyze. Default: all pages",
+)
+@click.option(
+    "--summary", "-s",
+    is_flag=True,
+    help="Show summary only (table count per page)",
+)
+@click.option(
+    "--no-content",
+    is_flag=True,
+    help="Hide table cell contents",
+)
+@click.option(
+    "--col-width", "-w",
+    type=int,
+    default=15,
+    help="Maximum column width for display. Default: 15",
+)
+def tables(
+    pdf_file: Path,
+    page: int | None,
+    summary: bool,
+    no_content: bool,
+    col_width: int,
+):
+    """Detect and display tables in PDF.
+
+    PDF_FILE: Path to the PDF file to analyze.
+
+    Examples:
+        uv run python main.py tables sample.pdf
+        uv run python main.py tables sample.pdf --page 3
+        uv run python main.py tables sample.pdf --summary
+        uv run python main.py tables sample.pdf --no-content
+        uv run python main.py tables sample.pdf --col-width 20
+    """
+    try:
+        analyzer = PDFAnalyzer(pdf_file)
+
+        if summary:
+            # Show summary only
+            table_summary = analyzer.get_table_summary()
+            doc_info = analyzer.get_document_info()
+            format_table_summary(table_summary, console, doc_info.page_count)
+        else:
+            # Extract and display tables
+            detected_tables = analyzer.extract_tables(page_number=page)
+            format_tables(
+                detected_tables,
+                console,
+                show_content=not no_content,
+                max_col_width=col_width,
+            )
     except FileNotFoundError as e:
         console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)

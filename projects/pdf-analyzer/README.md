@@ -58,6 +58,41 @@ uv run python main.py page sample.pdf -e images
 uv run python main.py page sample.pdf -e chars --limit 50
 ```
 
+### `tables` - 테이블 감지 및 분석
+
+```bash
+# 전체 문서의 테이블 분석
+uv run python main.py tables sample.pdf
+
+# 특정 페이지의 테이블만 분석
+uv run python main.py tables sample.pdf --page 3
+
+# 테이블 요약만 보기 (어느 페이지에 몇 개)
+uv run python main.py tables sample.pdf --summary
+
+# 셀 내용 숨기기
+uv run python main.py tables sample.pdf --no-content
+
+# 열 너비 조정
+uv run python main.py tables sample.pdf --col-width 20
+```
+
+출력 예시:
+```
+╭────────────────────────────── Tables Detected ───────────────────────────────╮
+│ 1 table(s) found on 1 page(s)                                                │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Page 1: 1 table(s)
+
+Table 1 (4 rows x 4 cols)
+Location: (72.0, 150.0) - (432.0, 250.0) | Size: 360.0 x 100.0 pt
+ Category         2023   2024   2025E
+ Revenue          258.9  279.6  298.0
+ Operating Pro..  6.6    8.5    12.0
+ Net Income       15.5   18.2   22.0
+```
+
 ## CLI 옵션
 
 ### `info` 명령어
@@ -73,6 +108,15 @@ uv run python main.py page sample.pdf -e chars --limit 50
 | `--page, -p` | 1 | 분석할 페이지 번호 (1부터 시작) |
 | `--element, -e` | (요약) | 표시할 요소 (chars, lines, rects, images) |
 | `--limit, -l` | 20 | 표시할 최대 항목 수 |
+
+### `tables` 명령어
+
+| 옵션 | 기본값 | 설명 |
+|------|--------|------|
+| `--page, -p` | (전체) | 특정 페이지만 분석 |
+| `--summary, -s` | false | 요약만 표시 (테이블 개수) |
+| `--no-content` | false | 셀 내용 숨기기 |
+| `--col-width, -w` | 15 | 열 최대 너비 |
 
 ## PDF 요소 설명
 

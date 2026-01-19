@@ -126,6 +126,48 @@ class ImageInfo:
 
 
 @dataclass
+class TableInfo:
+    """Information about a detected table in PDF."""
+
+    page_number: int
+    table_index: int
+    bbox: tuple[float, float, float, float]  # (x0, top, x1, bottom)
+    row_count: int
+    col_count: int
+    cells: list[list[str | None]]  # 2D array of cell contents
+
+    @property
+    def x0(self) -> float:
+        """Left x coordinate."""
+        return self.bbox[0]
+
+    @property
+    def top(self) -> float:
+        """Top y coordinate."""
+        return self.bbox[1]
+
+    @property
+    def x1(self) -> float:
+        """Right x coordinate."""
+        return self.bbox[2]
+
+    @property
+    def bottom(self) -> float:
+        """Bottom y coordinate."""
+        return self.bbox[3]
+
+    @property
+    def width(self) -> float:
+        """Table width in points."""
+        return self.bbox[2] - self.bbox[0]
+
+    @property
+    def height(self) -> float:
+        """Table height in points."""
+        return self.bbox[3] - self.bbox[1]
+
+
+@dataclass
 class PageAnalysis:
     """Analysis result for a single PDF page."""
 
@@ -344,3 +386,85 @@ class PDFAnalyzer:
                     all_fonts[font] = all_fonts.get(font, 0) + 1
 
         return dict(sorted(all_fonts.items(), key=lambda x: -x[1]))
+
+    def extract_tables(
+        self,
+        page_number: int | None = None,
+    ) -> list[TableInfo]:
+        """Extract tables from PDF.
+
+        Args:
+            page_number: 1-indexed page number. If None, extract from all pages.
+
+        Returns:
+            List of TableInfo objects for detected tables.
+
+        Raises:
+            ValueError: If page number is out of range.
+        """
+        tables: list[TableInfo] = []
+
+        with pdfplumber.open(self.pdf_path) as pdf:
+            if page_number is not None:
+                if page_number < 1 or page_number > len(pdf.pages):
+                    raise ValueError(
+                        f"Page {page_number} out of range. "
+                        f"Document has {len(pdf.pages)} pages."
+                    )
+                pages_to_process = [(page_number, pdf.pages[page_number - 1])]
+            else:
+                pages_to_process = [
+                    (i + 1, page) for i, page in enumerate(pdf.pages)
+                ]
+
+            for page_num, page in pages_to_process:
+                page_tables = page.find_tables()
+
+                for table_idx, table in enumerate(page_tables):
+                    # Extract table data
+                    extracted = table.extract()
+                    if not extracted:
+                        continue
+
+                    # Get bounding box
+                    bbox = table.bbox  # (x0, top, x1, bottom)
+
+                    # Count rows and columns
+                    row_count = len(extracted)
+                    col_count = max(len(row) for row in extracted) if extracted else 0
+
+                    # Normalize cells (ensure all rows have same column count)
+                    normalized_cells: list[list[str | None]] = []
+                    for row in extracted:
+                        normalized_row = list(row) + [None] * (col_count - len(row))
+                        normalized_cells.append(normalized_row)
+
+                    tables.append(
+                        TableInfo(
+                            page_number=page_num,
+                            table_index=table_idx,
+                            bbox=bbox,
+                            row_count=row_count,
+                            col_count=col_count,
+                            cells=normalized_cells,
+                        )
+                    )
+
+        return tables
+
+    def get_table_summary(self) -> dict[int, int]:
+        """Get table count per page.
+
+        Returns:
+            Dictionary mapping page number to table count.
+        """
+        summary: dict[int, int] = {}
+
+        with pdfplumber.open(self.pdf_path) as pdf:
+            for i, page in enumerate(pdf.pages):
+                page_num = i + 1
+                table_count = len(page.find_tables())
+                if table_count > 0:
+                    summary[page_num] = table_count
+
+        return summary

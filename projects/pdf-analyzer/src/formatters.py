@@ -4,7 +4,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from src.analyzer import DocumentInfo, PageAnalysis
+from src.analyzer import DocumentInfo, PageAnalysis, TableInfo
 
 
 def format_document_info(doc_info: DocumentInfo, console: Console) -> None:
@@ -374,3 +374,145 @@ def _format_images(
         console.print(
             f"\n[dim]... and {len(analysis.images) - limit} more images[/dim]"
         )
+
+
+def format_tables(
+    tables: list[TableInfo],
+    console: Console,
+    show_content: bool = True,
+    max_col_width: int = 15,
+) -> None:
+    """Print detected tables to console.
+
+    Args:
+        tables: List of TableInfo objects.
+        console: Rich console for output.
+        show_content: Whether to show table cell contents.
+        max_col_width: Maximum column width for cell display.
+    """
+    if not tables:
+        console.print(
+            Panel(
+                "[dim]No tables detected in this document.[/dim]",
+                title="Tables",
+                border_style="blue",
+            )
+        )
+        return
+
+    # Group tables by page
+    tables_by_page: dict[int, list[TableInfo]] = {}
+    for table in tables:
+        if table.page_number not in tables_by_page:
+            tables_by_page[table.page_number] = []
+        tables_by_page[table.page_number].append(table)
+
+    # Summary header
+    total_tables = len(tables)
+    pages_with_tables = len(tables_by_page)
+    console.print(
+        Panel(
+            f"[bold]{total_tables} table(s)[/bold] found on {pages_with_tables} page(s)",
+            title="Tables Detected",
+            border_style="blue",
+        )
+    )
+
+    # Display each table
+    for page_num in sorted(tables_by_page.keys()):
+        page_tables = tables_by_page[page_num]
+        console.print(f"\n[bold cyan]Page {page_num}[/bold cyan]: {len(page_tables)} table(s)")
+
+        for table in page_tables:
+            _format_single_table(table, console, show_content, max_col_width)
+
+
+def _format_single_table(
+    table: TableInfo,
+    console: Console,
+    show_content: bool,
+    max_col_width: int,
+) -> None:
+    """Format a single table."""
+    console.print()
+    console.print(
+        f"[bold]Table {table.table_index + 1}[/bold] "
+        f"({table.row_count} rows x {table.col_count} cols)"
+    )
+    console.print(
+        f"[dim]Location: ({table.x0:.1f}, {table.top:.1f}) - "
+        f"({table.x1:.1f}, {table.bottom:.1f}) | "
+        f"Size: {table.width:.1f} x {table.height:.1f} pt[/dim]"
+    )
+
+    if not show_content or not table.cells:
+        return
+
+    # Create rich table for display
+    rich_table = Table(show_header=False, box=None, padding=(0, 1))
+
+    # Add columns
+    for _ in range(table.col_count):
+        rich_table.add_column(max_width=max_col_width, overflow="ellipsis")
+
+    # Add rows
+    for row_idx, row in enumerate(table.cells):
+        formatted_cells = []
+        for cell in row:
+            cell_text = _truncate_cell(cell, max_col_width)
+            # Bold first row (likely header)
+            if row_idx == 0:
+                cell_text = f"[bold]{cell_text}[/bold]"
+            formatted_cells.append(cell_text)
+        rich_table.add_row(*formatted_cells)
+
+    console.print(rich_table)
+
+
+def _truncate_cell(cell: str | None, max_width: int) -> str:
+    """Truncate cell content for display."""
+    if cell is None:
+        return "[dim]-[/dim]"
+
+    # Clean up whitespace
+    cell = " ".join(cell.split())
+
+    if len(cell) <= max_width:
+        return cell
+
+    return cell[: max_width - 2] + ".."
+
+
+def format_table_summary(
+    table_summary: dict[int, int],
+    console: Console,
+    total_pages: int,
+) -> None:
+    """Print table summary per page.
+
+    Args:
+        table_summary: Dictionary mapping page number to table count.
+        console: Rich console for output.
+        total_pages: Total number of pages in document.
+    """
+    console.print(
+        Panel(
+            f"[bold]{sum(table_summary.values())} table(s)[/bold] "
+            f"on {len(table_summary)} of {total_pages} pages",
+            title="Table Summary",
+            border_style="blue",
+        )
+    )
+
+    if not table_summary:
+        console.print("[dim]No tables detected.[/dim]")
+        return
+
+    summary_table = Table(box=None)
+    summary_table.add_column("Page", justify="right", style="bold")
+    summary_table.add_column("Tables", justify="right")
+
+    for page_num in sorted(table_summary.keys()):
+        summary_table.add_row(str(page_num), str(table_summary[page_num]))
+
+    console.print(summary_table)
