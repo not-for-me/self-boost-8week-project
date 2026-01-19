@@ -468,3 +468,205 @@ class PDFAnalyzer:
                     summary[page_num] = table_count
 
         return summary
+
+
+@dataclass
+class PDFStats:
+    """Statistics for a single PDF file."""
+
+    file_path: Path
+    page_count: int
+    total_chars: int
+    total_lines: int
+    total_images: int
+    total_tables: int
+    page_sizes: list[tuple[float, float]]  # List of (width, height)
+    fonts: dict[str, int]
+
+    @property
+    def avg_chars_per_page(self) -> float:
+        """Average characters per page."""
+        return self.total_chars / self.page_count if self.page_count > 0 else 0
+
+    @property
+    def avg_lines_per_page(self) -> float:
+        """Average lines per page."""
+        return self.total_lines / self.page_count if self.page_count > 0 else 0
+
+
+@dataclass
+class CollectionStats:
+    """Aggregated statistics for multiple PDF files."""
+
+    file_count: int
+    total_pages: int
+    page_size_distribution: dict[str, int]  # e.g., "A4 Portrait": 120
+    chars_stats: dict[str, float]  # min, max, avg, median
+    lines_stats: dict[str, float]
+    images_stats: dict[str, float]
+    tables_stats: dict[str, float]
+    font_usage: dict[str, int]  # font name -> file count
+    errors: list[tuple[Path, str]]  # Files that failed to process
+
+
+def analyze_single_pdf(pdf_path: Path) -> PDFStats:
+    """Analyze a single PDF and return statistics.
+
+    Args:
+        pdf_path: Path to PDF file.
+
+    Returns:
+        PDFStats object with file statistics.
+    """
+    analyzer = PDFAnalyzer(pdf_path)
+
+    total_chars = 0
+    total_lines = 0
+    total_images = 0
+    page_sizes = []
+    all_fonts: dict[str, int] = {}
+
+    with pdfplumber.open(pdf_path) as pdf:
+        page_count = len(pdf.pages)
+
+        for page in pdf.pages:
+            total_chars += len(page.chars) if page.chars else 0
+            total_lines += len(page.lines) if page.lines else 0
+            total_images += len(page.images) if page.images else 0
+            page_sizes.append((page.width, page.height))
+
+            for char in page.chars or []:
+                font = char.get("fontname", "Unknown")
+                all_fonts[font] = all_fonts.get(font, 0) + 1
+
+    # Count tables
+    total_tables = sum(analyzer.get_table_summary().values())
+
+    return PDFStats(
+        file_path=pdf_path,
+        page_count=page_count,
+        total_chars=total_chars,
+        total_lines=total_lines,
+        total_images=total_images,
+        total_tables=total_tables,
+        page_sizes=page_sizes,
+        fonts=all_fonts,
+    )
+
+
+def _classify_page_size(width: float, height: float) -> str:
+    """Classify page size into common formats."""
+    # A4: 595 x 842 pt (with some tolerance)
+    if abs(width - 595) < 10 and abs(height - 842) < 10:
+        return "A4 Portrait"
+    elif abs(width - 842) < 10 and abs(height - 595) < 10:
+        return "A4 Landscape"
+    # Letter: 612 x 792 pt
+    elif abs(width - 612) < 10 and abs(height - 792) < 10:
+        return "Letter Portrait"
+    elif abs(width - 792) < 10 and abs(height - 612) < 10:
+        return "Letter Landscape"
+    else:
+        return f"Other ({width:.0f}x{height:.0f})"
+
+
+def _calculate_stats(values: list[float]) -> dict[str, float]:
+    """Calculate min, max, avg, median for a list of values."""
+    if not values:
+        return {"min": 0, "max": 0, "avg": 0, "median": 0}
+
+    sorted_values = sorted(values)
+    n = len(sorted_values)
+
+    return {
+        "min": min(values),
+        "max": max(values),
+        "avg": sum(values) / n,
+        "median": sorted_values[n // 2] if n % 2 == 1
+        else (sorted_values[n // 2 - 1] + sorted_values[n // 2]) / 2,
+    }
+
+
+def analyze_collection(
+    pdf_paths: list[Path],
+    on_progress: callable | None = None,
+) -> CollectionStats:
+    """Analyze multiple PDF files and return aggregated statistics.
+
+    Args:
+        pdf_paths: List of PDF file paths.
+        on_progress: Optional callback(current, total, file_path) for progress.
+
+    Returns:
+        CollectionStats with aggregated statistics.
+    """
+    all_stats: list[PDFStats] = []
+    errors: list[tuple[Path, str]] = []
+
+    total = len(pdf_paths)
+
+    for i, pdf_path in enumerate(pdf_paths):
+        if on_progress:
+            on_progress(i + 1, total, pdf_path)
+
+        try:
+            stats = analyze_single_pdf(pdf_path)
+            all_stats.append(stats)
+        except Exception as e:
+            errors.append((pdf_path, str(e)))
+
+    if not all_stats:
+        return CollectionStats(
+            file_count=0,
+            total_pages=0,
+            page_size_distribution={},
+            chars_stats={"min": 0, "max": 0, "avg": 0, "median": 0},
+            lines_stats={"min": 0, "max": 0, "avg": 0, "median": 0},
+            images_stats={"min": 0, "max": 0, "avg": 0, "median": 0},
+            tables_stats={"min": 0, "max": 0, "avg": 0, "median": 0},
+            font_usage={},
+            errors=errors,
+        )
+
+    # Aggregate page sizes
+    page_size_dist: dict[str, int] = {}
+    for stats in all_stats:
+        for width, height in stats.page_sizes:
+            size_name = _classify_page_size(width, height)
+            page_size_dist[size_name] = page_size_dist.get(size_name, 0) + 1
+
+    # Calculate per-page statistics
+    chars_per_page = []
+    lines_per_page = []
+    images_per_page = []
+    tables_per_file = []
+
+    for stats in all_stats:
+        if stats.page_count > 0:
+            chars_per_page.append(stats.total_chars / stats.page_count)
+            lines_per_page.append(stats.total_lines / stats.page_count)
+            images_per_page.append(stats.total_images / stats.page_count)
+        tables_per_file.append(stats.total_tables)
+
+    # Aggregate font usage (count files using each font)
+    font_file_count: dict[str, int] = {}
+    for stats in all_stats:
+        for font in stats.fonts.keys():
+            font_file_count[font] = font_file_count.get(font, 0) + 1
+
+    # Sort by usage
+    font_file_count = dict(
+        sorted(font_file_count.items(), key=lambda x: -x[1])
+    )
+
+    return CollectionStats(
+        file_count=len(all_stats),
+        total_pages=sum(s.page_count for s in all_stats),
+        page_size_distribution=page_size_dist,
+        chars_stats=_calculate_stats(chars_per_page),
+        lines_stats=_calculate_stats(lines_per_page),
+        images_stats=_calculate_stats(images_per_page),
+        tables_stats=_calculate_stats(tables_per_file),
+        font_usage=font_file_count,
+        errors=errors,
+    )

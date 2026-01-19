@@ -4,7 +4,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from src.analyzer import DocumentInfo, PageAnalysis, TableInfo
+from src.analyzer import CollectionStats, DocumentInfo, PageAnalysis, TableInfo
 
 
 def format_document_info(doc_info: DocumentInfo, console: Console) -> None:
@@ -516,3 +516,111 @@ def format_table_summary(
         summary_table.add_row(str(page_num), str(table_summary[page_num]))
 
     console.print(summary_table)
+
+
+def format_collection_stats(stats: CollectionStats, console: Console) -> None:
+    """Print collection statistics to console.
+
+    Args:
+        stats: Collection statistics to display.
+        console: Rich console for output.
+    """
+    # Header
+    console.print(
+        Panel(
+            f"[bold]{stats.file_count} file(s)[/bold] analyzed, "
+            f"[bold]{stats.total_pages}[/bold] total pages",
+            title="PDF Collection Statistics",
+            border_style="blue",
+        )
+    )
+
+    if stats.file_count == 0:
+        console.print("[dim]No files were successfully analyzed.[/dim]")
+        if stats.errors:
+            _format_errors(stats.errors, console)
+        return
+
+    # Page size distribution
+    console.print("\n[bold cyan]Page Size Distribution[/bold cyan]")
+    size_table = Table(box=None)
+    size_table.add_column("Size", style="dim")
+    size_table.add_column("Count", justify="right")
+    size_table.add_column("Percentage", justify="right")
+
+    total_pages = sum(stats.page_size_distribution.values())
+    for size_name, count in sorted(
+        stats.page_size_distribution.items(),
+        key=lambda x: -x[1]
+    ):
+        pct = (count / total_pages * 100) if total_pages > 0 else 0
+        size_table.add_row(size_name, str(count), f"{pct:.1f}%")
+
+    console.print(size_table)
+
+    # Content statistics
+    console.print("\n[bold cyan]Content Statistics (per page)[/bold cyan]")
+    content_table = Table(box=None)
+    content_table.add_column("Metric", style="dim")
+    content_table.add_column("Min", justify="right")
+    content_table.add_column("Max", justify="right")
+    content_table.add_column("Avg", justify="right")
+    content_table.add_column("Median", justify="right")
+
+    content_table.add_row(
+        "Characters",
+        f"{stats.chars_stats['min']:.0f}",
+        f"{stats.chars_stats['max']:.0f}",
+        f"{stats.chars_stats['avg']:.0f}",
+        f"{stats.chars_stats['median']:.0f}",
+    )
+    content_table.add_row(
+        "Lines",
+        f"{stats.lines_stats['min']:.0f}",
+        f"{stats.lines_stats['max']:.0f}",
+        f"{stats.lines_stats['avg']:.0f}",
+        f"{stats.lines_stats['median']:.0f}",
+    )
+    content_table.add_row(
+        "Images",
+        f"{stats.images_stats['min']:.1f}",
+        f"{stats.images_stats['max']:.1f}",
+        f"{stats.images_stats['avg']:.1f}",
+        f"{stats.images_stats['median']:.1f}",
+    )
+    content_table.add_row(
+        "Tables (per file)",
+        f"{stats.tables_stats['min']:.0f}",
+        f"{stats.tables_stats['max']:.0f}",
+        f"{stats.tables_stats['avg']:.1f}",
+        f"{stats.tables_stats['median']:.0f}",
+    )
+
+    console.print(content_table)
+
+    # Font usage
+    if stats.font_usage:
+        console.print("\n[bold cyan]Font Usage (Top 10)[/bold cyan]")
+        font_table = Table(box=None)
+        font_table.add_column("Font", style="dim")
+        font_table.add_column("Files", justify="right")
+        font_table.add_column("Percentage", justify="right")
+
+        for font, count in list(stats.font_usage.items())[:10]:
+            pct = (count / stats.file_count * 100) if stats.file_count > 0 else 0
+            font_table.add_row(font, str(count), f"{pct:.1f}%")
+
+        console.print(font_table)
+
+    # Errors
+    if stats.errors:
+        _format_errors(stats.errors, console)
+
+
+def _format_errors(errors: list[tuple], console: Console) -> None:
+    """Format error list."""
+    console.print(f"\n[bold red]Errors ({len(errors)} files)[/bold red]")
+    for path, error in errors[:10]:
+        console.print(f"  [dim]{path.name}:[/dim] {error}")
+    if len(errors) > 10:
+        console.print(f"  [dim]... and {len(errors) - 10} more[/dim]")

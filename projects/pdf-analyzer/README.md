@@ -93,6 +93,68 @@ Location: (72.0, 150.0) - (432.0, 250.0) | Size: 360.0 x 100.0 pt
  Net Income       15.5   18.2   22.0
 ```
 
+### `visual` - ASCII 시각화
+
+```bash
+# 페이지 레이아웃 시각화
+uv run python main.py visual sample.pdf
+
+# 특정 페이지 시각화
+uv run python main.py visual sample.pdf --page 2
+
+# 크기 조정
+uv run python main.py visual sample.pdf --width 80 --height 40
+
+# 테이블 경계 포함
+uv run python main.py visual sample.pdf --with-tables
+```
+
+출력 예시:
+```
+============================================================
+                   Page 1 (595 x 842 pt)
+============================================================
++------------------------------------------------------------+
+|       ██ █ █████ ██ ███ ██ █ ██ █                          |
+|       ══════════════════════════════════════════════       |
+|      ║██████████████████████████████████████               |
+|      ║██████████████████████████████                       |
++------------------------------------------------------------+
+
+Legend:
+  █ = Text    ═/║ = Lines    ─│ = Table    ▓ = Image
+```
+
+### `stats` - 다중 파일 통계
+
+```bash
+# 여러 파일 통계
+uv run python main.py stats *.pdf
+
+# 하위 폴더 포함
+uv run python main.py stats ../data/**/*.pdf
+
+# 분석 파일 수 제한
+uv run python main.py stats ../data/**/*.pdf --limit 100
+```
+
+출력 예시:
+```
+╭───────────────────────── PDF Collection Statistics ──────────────────────────╮
+│ 100 file(s) analyzed, 1,523 total pages                                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Page Size Distribution
+ Size         Count  Percentage
+ A4 Portrait   1420       93.2%
+ A4 Landscape   103        6.8%
+
+Content Statistics (per page)
+ Metric       Min    Max    Avg  Median
+ Characters   156  8,234  2,456   2,100
+ Lines          0    245     68      52
+```
+
 ## CLI 옵션
 
 ### `info` 명령어
@@ -117,6 +179,21 @@ Location: (72.0, 150.0) - (432.0, 250.0) | Size: 360.0 x 100.0 pt
 | `--summary, -s` | false | 요약만 표시 (테이블 개수) |
 | `--no-content` | false | 셀 내용 숨기기 |
 | `--col-width, -w` | 15 | 열 최대 너비 |
+
+### `visual` 명령어
+
+| 옵션 | 기본값 | 설명 |
+|------|--------|------|
+| `--page, -p` | 1 | 시각화할 페이지 번호 |
+| `--width, -w` | 60 | 시각화 너비 (문자) |
+| `--height, -h` | 30 | 시각화 높이 (문자) |
+| `--with-tables, -t` | false | 테이블 경계 표시 |
+
+### `stats` 명령어
+
+| 옵션 | 기본값 | 설명 |
+|------|--------|------|
+| `--limit, -l` | (전체) | 분석할 최대 파일 수 |
 
 ## PDF 요소 설명
 
