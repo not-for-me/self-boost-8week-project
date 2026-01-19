@@ -171,9 +171,7 @@ class ReportScraper:
         self._log_final_stats(stats)
         return stats
 
-    def _collect_reports_by_broker(
-        self, target: int
-    ) -> dict[str, list[ReportInfo]]:
+    def _collect_reports_by_broker(self, target: int) -> dict[str, list[ReportInfo]]:
         """Collect reports grouped by broker from multiple pages.
 
         Filters out already downloaded URLs during collection.

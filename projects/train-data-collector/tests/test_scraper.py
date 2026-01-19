@@ -303,7 +303,9 @@ class TestScraperDownloadReport:
 
         with ReportScraper(config, temp_data_dir) as scraper:
             scraper._downloader.download = MagicMock(
-                return_value=DownloadResult(success=False, skipped_reason="download error")
+                return_value=DownloadResult(
+                    success=False, skipped_reason="download error"
+                )
             )
             stats = CollectionStats()
 
@@ -339,7 +341,9 @@ class TestScraperDownloadWithDistribution:
             stats = CollectionStats()
 
             # Act
-            scraper._download_with_distribution(sample_reports_by_broker, stats, target=100)
+            scraper._download_with_distribution(
+                sample_reports_by_broker, stats, target=100
+            )
 
             # Assert - each broker should have at least min_per_broker
             for broker in sample_reports_by_broker.keys():
@@ -358,7 +362,9 @@ class TestScraperDownloadWithDistribution:
             stats = CollectionStats()
 
             # Act
-            scraper._download_with_distribution(sample_reports_by_broker, stats, target=6)
+            scraper._download_with_distribution(
+                sample_reports_by_broker, stats, target=6
+            )
 
             # Assert
             assert stats.total_downloaded == 6
@@ -378,7 +384,9 @@ class TestScraperDownloadWithDistribution:
             stats = CollectionStats()
 
             # Act
-            scraper._download_with_distribution(sample_reports_by_broker, stats, target=9)
+            scraper._download_with_distribution(
+                sample_reports_by_broker, stats, target=9
+            )
 
             # Assert - should have downloads from all 3 brokers
             assert stats.get_unique_broker_count() == 3

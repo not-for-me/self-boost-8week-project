@@ -142,9 +142,7 @@ class PDFDownloader:
 
         return DownloadResult(success=True, path=target_path, file_hash=file_hash)
 
-    def _generate_filename(
-        self, report: ReportInfo, existing_files: list[str]
-    ) -> str:
+    def _generate_filename(self, report: ReportInfo, existing_files: list[str]) -> str:
         """Generate filename in format: {date}_{seq}.pdf.
 
         Continues from the highest existing sequence number for the same date.

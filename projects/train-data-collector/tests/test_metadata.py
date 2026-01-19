@@ -295,7 +295,7 @@ class TestMetadataManager:
                 stock_name="테스트",
                 title="테스트 리포트",
                 date="2026-01-19",
-                local_path=f"한화투자증권/2026-01-19_0{i+1}.pdf",
+                local_path=f"한화투자증권/2026-01-19_0{i + 1}.pdf",
                 file_hash=f"md5:hash{i}",
             )
         manager.add_report(

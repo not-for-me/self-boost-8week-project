@@ -158,9 +158,7 @@ class TestDownload:
     """Tests for PDFDownloader.download()."""
 
     @respx.mock
-    def test_saves_pdf_to_correct_path(
-        self, downloader, sample_report, temp_data_dir
-    ):
+    def test_saves_pdf_to_correct_path(self, downloader, sample_report, temp_data_dir):
         """Given: valid URL, When: download, Then: saved to broker/date_seq.pdf."""
         # Arrange
         pdf_content = b"%PDF-1.4 test content"
@@ -184,9 +182,7 @@ class TestDownload:
         assert result.path.read_bytes() == pdf_content
 
     @respx.mock
-    def test_creates_broker_directory(
-        self, downloader, sample_report, temp_data_dir
-    ):
+    def test_creates_broker_directory(self, downloader, sample_report, temp_data_dir):
         """Given: broker dir doesn't exist, When: download, Then: dir created."""
         # Arrange
         pdf_content = b"%PDF-1.4 test"
@@ -212,9 +208,7 @@ class TestDownload:
     def test_returns_failure_on_404(self, downloader, sample_report):
         """Given: 404 response, When: download, Then: returns failure result."""
         # Arrange
-        respx.get(sample_report.pdf_url).mock(
-            return_value=httpx.Response(404)
-        )
+        respx.get(sample_report.pdf_url).mock(return_value=httpx.Response(404))
 
         # Act
         result = downloader.download(sample_report)

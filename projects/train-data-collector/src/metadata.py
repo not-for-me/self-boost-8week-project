@@ -21,7 +21,9 @@ class ReportMetadata:
     stock_name: str
     title: str
     date: str  # yyyy-mm-dd format
-    local_path: str  # Relative path from data_dir (e.g., "한화투자증권/2026-01-19_01.pdf")
+    local_path: (
+        str  # Relative path from data_dir (e.g., "한화투자증권/2026-01-19_01.pdf")
+    )
     file_hash: str  # Format: "md5:{hash}"
     downloaded_at: str  # ISO format timestamp
 
@@ -39,7 +41,9 @@ class ReportMetadata:
 class MetadataStore:
     """Storage structure for all metadata."""
 
-    reports: dict[str, ReportMetadata] = field(default_factory=dict)  # pdf_url -> metadata
+    reports: dict[str, ReportMetadata] = field(
+        default_factory=dict
+    )  # pdf_url -> metadata
     hashes: dict[str, str] = field(default_factory=dict)  # file_hash -> pdf_url
 
     def add_report(self, metadata: ReportMetadata) -> None:
