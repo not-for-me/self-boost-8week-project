@@ -87,11 +87,8 @@ self-boost-8week-project/
 
 ```bash
 cd projects
-mkdir [프로젝트명]
-cd [프로젝트명]
-uv init
-uv venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+uv init [프로젝트명] -p 3.14
+uv sync
 ```
 
 ### 일일 기록 작성
