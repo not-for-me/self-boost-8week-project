@@ -17,7 +17,8 @@ from src.config import (
     REQUEST_TIMEOUT,
 )
 from src.downloader import PDFDownloader
-from src.parser import ReportInfo, get_total_pages, get_unique_brokers, parse_report_list
+from src.metadata import MetadataManager
+from src.parser import ReportInfo, get_total_pages, parse_report_list
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,8 @@ class CollectionStats:
     total_downloaded: int = 0
     by_broker: dict[str, int] = field(default_factory=dict)
     failed: int = 0
-    skipped: int = 0
+    skipped_url_duplicate: int = 0
+    skipped_content_duplicate: int = 0
 
     def add_download(self, broker: str) -> None:
         """Record a successful download."""
@@ -50,9 +52,18 @@ class CollectionStats:
         """Record a failed download."""
         self.failed += 1
 
-    def add_skip(self) -> None:
-        """Record a skipped report."""
-        self.skipped += 1
+    def add_skip_url_duplicate(self) -> None:
+        """Record a skipped report due to URL duplicate."""
+        self.skipped_url_duplicate += 1
+
+    def add_skip_content_duplicate(self) -> None:
+        """Record a skipped report due to content duplicate."""
+        self.skipped_content_duplicate += 1
+
+    @property
+    def total_skipped(self) -> int:
+        """Total number of skipped reports."""
+        return self.skipped_url_duplicate + self.skipped_content_duplicate
 
     def get_broker_count(self, broker: str) -> int:
         """Get download count for a specific broker."""
@@ -77,23 +88,40 @@ class ReportScraper:
         self.data_dir = Path(data_dir)
         self._client = httpx.Client(headers=DEFAULT_HEADERS, timeout=REQUEST_TIMEOUT)
         self._downloader: PDFDownloader | None = None
-        self._downloaded_urls: set[str] = set()
+        self._metadata: MetadataManager | None = None
+        self._session_downloaded_urls: set[str] = set()  # Track URLs in current session
 
     def __enter__(self):
+        self._metadata = MetadataManager(self.data_dir)
         self._downloader = PDFDownloader(
             base_dir=self.data_dir,
             delay_range=self.config.delay_range,
+            metadata_manager=self._metadata,
         )
+
+        # Log existing metadata stats
+        existing_count = self._metadata.get_total_count()
+        if existing_count > 0:
+            logger.info(f"기존 메타데이터 로드: {existing_count}개 리포트")
+            existing_stats = self._metadata.get_stats()
+            for broker, count in sorted(
+                existing_stats.items(), key=lambda x: x[1], reverse=True
+            ):
+                logger.debug(f"  - {broker}: {count}개")
+
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
     def close(self) -> None:
-        """Close HTTP client and downloader."""
+        """Close HTTP client and downloader, save metadata."""
         self._client.close()
         if self._downloader:
             self._downloader.close()
+        if self._metadata:
+            self._metadata.save()
+            logger.info("메타데이터 저장 완료")
 
     def run(self) -> CollectionStats:
         """Execute the full collection process.
@@ -101,17 +129,28 @@ class ReportScraper:
         Returns:
             CollectionStats with download results.
         """
-        if not self._downloader:
+        if not self._downloader or not self._metadata:
             raise RuntimeError("Scraper must be used as context manager")
 
         stats = CollectionStats()
+
+        # Calculate effective target (subtract already downloaded)
+        existing_count = self._metadata.get_total_count()
+        effective_target = max(0, self.config.total_target - existing_count)
+
         logger.info(
-            f"수집 시작: 목표 {self.config.total_target}개, "
+            f"수집 시작: 목표 {self.config.total_target}개 "
+            f"(기존 {existing_count}개, 추가 {effective_target}개 필요), "
             f"최소 {self.config.min_brokers}개 증권사"
         )
 
+        if effective_target == 0:
+            logger.info("이미 목표 수량에 도달했습니다.")
+            self._log_final_stats(stats)
+            return stats
+
         # Phase 1: Scan pages and collect reports by broker
-        reports_by_broker = self._collect_reports_by_broker()
+        reports_by_broker = self._collect_reports_by_broker(effective_target)
 
         if len(reports_by_broker) < self.config.min_brokers:
             logger.warning(
@@ -124,18 +163,26 @@ class ReportScraper:
             logger.debug(f"  - {broker}: {len(reports)}개 리포트")
 
         # Phase 2: Download with even distribution
-        self._download_with_distribution(reports_by_broker, stats)
+        self._download_with_distribution(reports_by_broker, stats, effective_target)
+
+        # Save metadata after completion
+        self._metadata.save()
 
         self._log_final_stats(stats)
         return stats
 
-    def _collect_reports_by_broker(self) -> dict[str, list[ReportInfo]]:
+    def _collect_reports_by_broker(
+        self, target: int
+    ) -> dict[str, list[ReportInfo]]:
         """Collect reports grouped by broker from multiple pages.
 
-        Scans pages until we have enough reports for the target.
+        Filters out already downloaded URLs during collection.
+
+        Args:
+            target: Number of new reports to collect.
         """
         reports_by_broker: dict[str, list[ReportInfo]] = defaultdict(list)
-        total_reports = 0
+        new_reports_count = 0
         page = 1
 
         # Get total pages from first page
@@ -146,15 +193,18 @@ class ReportScraper:
         # Parse first page
         reports = parse_report_list(first_html)
         for report in reports:
+            # Skip if already in metadata
+            if self._metadata and self._metadata.is_duplicate_url(report.pdf_url):
+                continue
             reports_by_broker[report.broker].append(report)
-            total_reports += 1
+            new_reports_count += 1
 
-        # Continue scanning until we have enough reports
+        # Continue scanning until we have enough new reports
         # Estimate: need ~target * 1.5 reports to account for failures and distribution
-        target_reports = int(self.config.total_target * 1.5)
+        target_reports = int(target * 1.5)
         page = 2
 
-        while total_reports < target_reports and page <= total_pages:
+        while new_reports_count < target_reports and page <= total_pages:
             html = self._fetch_page(page)
             reports = parse_report_list(html)
 
@@ -163,13 +213,16 @@ class ReportScraper:
                 break
 
             for report in reports:
+                # Skip if already in metadata
+                if self._metadata and self._metadata.is_duplicate_url(report.pdf_url):
+                    continue
                 reports_by_broker[report.broker].append(report)
-                total_reports += 1
+                new_reports_count += 1
 
             if page % 10 == 0:
                 logger.info(
                     f"페이지 {page} 스캔 완료: "
-                    f"{total_reports}개 리포트, {len(reports_by_broker)}개 증권사"
+                    f"{new_reports_count}개 신규 리포트, {len(reports_by_broker)}개 증권사"
                 )
 
             page += 1
@@ -180,6 +233,7 @@ class ReportScraper:
         self,
         reports_by_broker: dict[str, list[ReportInfo]],
         stats: CollectionStats,
+        target: int,
     ) -> None:
         """Download reports with even distribution across brokers.
 
@@ -198,7 +252,8 @@ class ReportScraper:
         for broker in brokers:
             reports = reports_by_broker[broker]
             for _ in range(self.config.min_per_broker):
-                if self._should_stop(stats):
+                if self._should_stop(stats, target):
+                    self._save_metadata_checkpoint()
                     return
 
                 idx = broker_indices[broker]
@@ -209,15 +264,18 @@ class ReportScraper:
                 broker_indices[broker] += 1
 
                 if self._download_report(report, stats):
-                    self._log_progress(stats)
+                    self._log_progress(stats, target)
 
         # Phase 2: Round-robin for remaining quota
         logger.info("Phase 2: 라운드 로빈 방식으로 추가 수집")
-        active_brokers = [b for b in brokers if broker_indices[b] < len(reports_by_broker[b])]
+        active_brokers = [
+            b for b in brokers if broker_indices[b] < len(reports_by_broker[b])
+        ]
 
-        while active_brokers and not self._should_stop(stats):
+        while active_brokers and not self._should_stop(stats, target):
             for broker in list(active_brokers):
-                if self._should_stop(stats):
+                if self._should_stop(stats, target):
+                    self._save_metadata_checkpoint()
                     return
 
                 reports = reports_by_broker[broker]
@@ -231,7 +289,7 @@ class ReportScraper:
                 broker_indices[broker] += 1
 
                 if self._download_report(report, stats):
-                    self._log_progress(stats)
+                    self._log_progress(stats, target)
 
     def _download_report(self, report: ReportInfo, stats: CollectionStats) -> bool:
         """Download a single report.
@@ -243,17 +301,24 @@ class ReportScraper:
         if not self._downloader:
             return False
 
-        # Skip duplicates
-        if report.pdf_url in self._downloaded_urls:
-            stats.add_skip()
+        # Skip if already downloaded in this session
+        if report.pdf_url in self._session_downloaded_urls:
+            stats.add_skip_url_duplicate()
             return False
 
-        self._downloaded_urls.add(report.pdf_url)
+        self._session_downloaded_urls.add(report.pdf_url)
 
         result = self._downloader.download(report)
-        if result:
+
+        if result.success:
             stats.add_download(report.broker)
             return True
+        elif result.skipped_reason and result.skipped_reason.startswith(
+            "duplicate_content:"
+        ):
+            stats.add_skip_content_duplicate()
+            logger.debug(f"Content duplicate: {report.pdf_url}")
+            return False
         else:
             stats.add_failure()
             return True
@@ -272,25 +337,35 @@ class ReportScraper:
         response.raise_for_status()
         return response.text
 
-    def _should_stop(self, stats: CollectionStats) -> bool:
+    def _should_stop(self, stats: CollectionStats, target: int) -> bool:
         """Determine if collection should stop.
 
         Args:
             stats: Current collection statistics.
+            target: Target number of downloads.
 
         Returns:
             True if target reached or should stop.
         """
-        return stats.total_downloaded >= self.config.total_target
+        return stats.total_downloaded >= target
 
-    def _log_progress(self, stats: CollectionStats) -> None:
+    def _save_metadata_checkpoint(self) -> None:
+        """Save metadata checkpoint during collection."""
+        if self._metadata:
+            self._metadata.save()
+            logger.debug("메타데이터 체크포인트 저장")
+
+    def _log_progress(self, stats: CollectionStats, target: int) -> None:
         """Log progress at regular intervals."""
         if stats.total_downloaded % 10 == 0:
             logger.info(
-                f"[{stats.total_downloaded}/{self.config.total_target}] "
+                f"[{stats.total_downloaded}/{target}] "
                 f"증권사 {stats.get_unique_broker_count()}개, "
-                f"실패 {stats.failed}개"
+                f"실패 {stats.failed}개, "
+                f"스킵 {stats.total_skipped}개"
             )
+            # Save checkpoint every 10 downloads
+            self._save_metadata_checkpoint()
 
     def _log_final_stats(self, stats: CollectionStats) -> None:
         """Log final collection statistics."""
@@ -299,9 +374,18 @@ class ReportScraper:
         logger.info("=" * 50)
         logger.info(f"총 다운로드: {stats.total_downloaded}개")
         logger.info(f"실패: {stats.failed}개")
-        logger.info(f"스킵: {stats.skipped}개")
+        logger.info(
+            f"스킵: {stats.total_skipped}개 "
+            f"(URL 중복: {stats.skipped_url_duplicate}, "
+            f"내용 중복: {stats.skipped_content_duplicate})"
+        )
         logger.info(f"증권사별 현황 ({stats.get_unique_broker_count()}개):")
         for broker, count in sorted(
             stats.by_broker.items(), key=lambda x: x[1], reverse=True
         ):
             logger.info(f"  - {broker}: {count}개")
+
+        # Also log total with existing
+        if self._metadata:
+            total = self._metadata.get_total_count()
+            logger.info(f"총 보유 리포트: {total}개")

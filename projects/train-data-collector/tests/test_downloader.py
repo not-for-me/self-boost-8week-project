@@ -176,11 +176,12 @@ class TestDownload:
         result = downloader.download(sample_report)
 
         # Assert
-        assert result is not None
-        assert result.exists()
-        assert result.parent.name == "테스트증권"
-        assert result.name == "2026-01-19_01.pdf"
-        assert result.read_bytes() == pdf_content
+        assert result.success is True
+        assert result.path is not None
+        assert result.path.exists()
+        assert result.path.parent.name == "테스트증권"
+        assert result.path.name == "2026-01-19_01.pdf"
+        assert result.path.read_bytes() == pdf_content
 
     @respx.mock
     def test_creates_broker_directory(
@@ -208,8 +209,8 @@ class TestDownload:
         assert broker_dir.is_dir()
 
     @respx.mock
-    def test_returns_none_on_404(self, downloader, sample_report):
-        """Given: 404 response, When: download, Then: returns None."""
+    def test_returns_failure_on_404(self, downloader, sample_report):
+        """Given: 404 response, When: download, Then: returns failure result."""
         # Arrange
         respx.get(sample_report.pdf_url).mock(
             return_value=httpx.Response(404)
@@ -219,7 +220,8 @@ class TestDownload:
         result = downloader.download(sample_report)
 
         # Assert
-        assert result is None
+        assert result.success is False
+        assert result.path is None
 
     @respx.mock
     def test_retries_on_server_error(self, downloader, sample_report):
@@ -240,7 +242,8 @@ class TestDownload:
         result = downloader.download(sample_report)
 
         # Assert
-        assert result is not None
+        assert result.success is True
+        assert result.path is not None
         assert route.call_count == 2
 
 

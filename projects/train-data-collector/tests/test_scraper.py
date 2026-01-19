@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.downloader import DownloadResult
 from src.parser import ReportInfo
 from src.scraper import CollectionConfig, CollectionStats, ReportScraper
 
@@ -108,16 +109,19 @@ class TestCollectionStats:
         # Assert
         assert stats.failed == 2
 
-    def test_add_skip_increments_skipped_count(self):
-        """Given: stats, When: add_skip, Then: skipped increments."""
+    def test_add_skip_url_duplicate_increments_count(self):
+        """Given: stats, When: add_skip_url_duplicate, Then: skipped increments."""
         # Arrange
         stats = CollectionStats()
 
         # Act
-        stats.add_skip()
+        stats.add_skip_url_duplicate()
+        stats.add_skip_content_duplicate()
 
         # Assert
-        assert stats.skipped == 1
+        assert stats.skipped_url_duplicate == 1
+        assert stats.skipped_content_duplicate == 1
+        assert stats.total_skipped == 2
 
     def test_get_broker_count_returns_zero_for_unknown(self):
         """Given: stats, When: get_broker_count unknown, Then: 0."""
@@ -197,7 +201,7 @@ class TestScraperShouldStop:
         stats = CollectionStats(total_downloaded=5)
 
         # Act
-        result = scraper._should_stop(stats)
+        result = scraper._should_stop(stats, target=10)
 
         # Assert
         assert result is False
@@ -210,7 +214,7 @@ class TestScraperShouldStop:
         stats = CollectionStats(total_downloaded=10)
 
         # Act
-        result = scraper._should_stop(stats)
+        result = scraper._should_stop(stats, target=10)
 
         # Assert
         assert result is True
@@ -223,7 +227,7 @@ class TestScraperShouldStop:
         stats = CollectionStats(total_downloaded=15)
 
         # Act
-        result = scraper._should_stop(stats)
+        result = scraper._should_stop(stats, target=10)
 
         # Assert
         assert result is True
@@ -244,7 +248,7 @@ class TestScraperDownloadReport:
         report = ReportInfo("t1", "한화투자증권", "LG화학", "26.01.19", "url1.pdf")
 
         with ReportScraper(config, temp_data_dir) as scraper:
-            scraper._downloaded_urls.add("url1.pdf")
+            scraper._session_downloaded_urls.add("url1.pdf")
             stats = CollectionStats()
 
             # Act
@@ -252,7 +256,7 @@ class TestScraperDownloadReport:
 
             # Assert
             assert result is False
-            assert stats.skipped == 1
+            assert stats.skipped_url_duplicate == 1
             assert stats.total_downloaded == 0
 
     def test_tracks_downloaded_urls(self, config, temp_data_dir):
@@ -262,14 +266,16 @@ class TestScraperDownloadReport:
 
         with ReportScraper(config, temp_data_dir) as scraper:
             # Mock successful download
-            scraper._downloader.download = MagicMock(return_value=Path("/fake/path.pdf"))
+            scraper._downloader.download = MagicMock(
+                return_value=DownloadResult(success=True, path=Path("/fake/path.pdf"))
+            )
             stats = CollectionStats()
 
             # Act
             scraper._download_report(report, stats)
 
             # Assert
-            assert "url1.pdf" in scraper._downloaded_urls
+            assert "url1.pdf" in scraper._session_downloaded_urls
 
     def test_records_success_on_successful_download(self, config, temp_data_dir):
         """Given: successful download, When: download, Then: success recorded."""
@@ -277,7 +283,9 @@ class TestScraperDownloadReport:
         report = ReportInfo("t1", "한화투자증권", "LG화학", "26.01.19", "url1.pdf")
 
         with ReportScraper(config, temp_data_dir) as scraper:
-            scraper._downloader.download = MagicMock(return_value=Path("/fake/path.pdf"))
+            scraper._downloader.download = MagicMock(
+                return_value=DownloadResult(success=True, path=Path("/fake/path.pdf"))
+            )
             stats = CollectionStats()
 
             # Act
@@ -294,7 +302,9 @@ class TestScraperDownloadReport:
         report = ReportInfo("t1", "한화투자증권", "LG화학", "26.01.19", "url1.pdf")
 
         with ReportScraper(config, temp_data_dir) as scraper:
-            scraper._downloader.download = MagicMock(return_value=None)
+            scraper._downloader.download = MagicMock(
+                return_value=DownloadResult(success=False, skipped_reason="download error")
+            )
             stats = CollectionStats()
 
             # Act
@@ -323,11 +333,13 @@ class TestScraperDownloadWithDistribution:
         config.min_per_broker = 2
 
         with ReportScraper(config, temp_data_dir) as scraper:
-            scraper._downloader.download = MagicMock(return_value=Path("/fake.pdf"))
+            scraper._downloader.download = MagicMock(
+                return_value=DownloadResult(success=True, path=Path("/fake.pdf"))
+            )
             stats = CollectionStats()
 
             # Act
-            scraper._download_with_distribution(sample_reports_by_broker, stats)
+            scraper._download_with_distribution(sample_reports_by_broker, stats, target=100)
 
             # Assert - each broker should have at least min_per_broker
             for broker in sample_reports_by_broker.keys():
@@ -340,11 +352,13 @@ class TestScraperDownloadWithDistribution:
         config.min_per_broker = 1
 
         with ReportScraper(config, temp_data_dir) as scraper:
-            scraper._downloader.download = MagicMock(return_value=Path("/fake.pdf"))
+            scraper._downloader.download = MagicMock(
+                return_value=DownloadResult(success=True, path=Path("/fake.pdf"))
+            )
             stats = CollectionStats()
 
             # Act
-            scraper._download_with_distribution(sample_reports_by_broker, stats)
+            scraper._download_with_distribution(sample_reports_by_broker, stats, target=6)
 
             # Assert
             assert stats.total_downloaded == 6
@@ -358,11 +372,13 @@ class TestScraperDownloadWithDistribution:
         config.min_per_broker = 2
 
         with ReportScraper(config, temp_data_dir) as scraper:
-            scraper._downloader.download = MagicMock(return_value=Path("/fake.pdf"))
+            scraper._downloader.download = MagicMock(
+                return_value=DownloadResult(success=True, path=Path("/fake.pdf"))
+            )
             stats = CollectionStats()
 
             # Act
-            scraper._download_with_distribution(sample_reports_by_broker, stats)
+            scraper._download_with_distribution(sample_reports_by_broker, stats, target=9)
 
             # Assert - should have downloads from all 3 brokers
             assert stats.get_unique_broker_count() == 3
