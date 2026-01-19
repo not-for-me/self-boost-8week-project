@@ -24,14 +24,16 @@ train-data-collector/
 │   ├── scraper.py          # 메인 스크래퍼 로직
 │   ├── downloader.py       # PDF 다운로드 담당
 │   ├── parser.py           # HTML 파싱 (리포트 목록 추출)
+│   ├── metadata.py         # 메타데이터 관리 및 중복 제거
 │   └── config.py           # 설정 상수
 ├── tests/
 │   ├── __init__.py
 │   ├── test_parser.py
 │   ├── test_downloader.py
-│   └── test_scraper.py
+│   ├── test_scraper.py
+│   └── test_metadata.py
 ├── docs/
-│   └── TECH_SPEC_scraper.md
+│   └── TECH_SPEC.md
 ├── main.py                 # 실행 진입점
 └── pyproject.toml
 ```
@@ -42,6 +44,7 @@ train-data-collector/
 projects/
 ├── train-data-collector/   # 프로젝트 폴더
 └── data/                   # 데이터 저장 폴더 (프로젝트 상위)
+    ├── metadata.json       # 수집된 리포트 메타데이터
     ├── 삼성증권/
     │   ├── 2025-01-15_01.pdf
     │   ├── 2025-01-15_02.pdf
@@ -101,21 +104,36 @@ PDF 파일 다운로드 및 저장을 담당한다.
 
 #### 인터페이스
 ```python
+@dataclass
+class DownloadResult:
+    """다운로드 결과."""
+    success: bool
+    path: Path | None = None
+    file_hash: str | None = None
+    skipped_reason: str | None = None
+
 class PDFDownloader:
-    def __init__(self, base_dir: Path, delay_range: tuple[float, float] = (5.0, 10.0)):
+    def __init__(
+        self,
+        base_dir: Path,
+        delay_range: tuple[float, float] = (5.0, 10.0),
+        metadata_manager: MetadataManager | None = None,
+    ):
         ...
 
-    def download(self, report: ReportInfo) -> Path | None:
+    def download(self, report: ReportInfo) -> DownloadResult:
         """
-        PDF 다운로드 후 저장 경로 반환.
-        실패 시 None 반환.
+        PDF 다운로드 후 결과 반환.
+        - 성공 시: success=True, path 및 file_hash 포함
+        - 실패 시: success=False, skipped_reason 포함
+        - 중복 컨텐츠: success=False, skipped_reason="duplicate_content:..."
         """
         ...
 
     def _generate_filename(self, report: ReportInfo, existing_files: list[str]) -> str:
         """
         파일명 생성: {date}_{seq}.pdf
-        같은 날짜에 여러 파일이 있으면 seq 증가 (01, 02, ...)
+        기존 파일의 최대 seq를 찾아 다음 번호 사용.
         """
         ...
 
@@ -155,25 +173,35 @@ class CollectionConfig:
 
 @dataclass
 class CollectionStats:
-    total_downloaded: int
-    by_broker: dict[str, int]
-    failed: int
-    skipped: int  # 중복 등으로 스킵
+    total_downloaded: int = 0
+    by_broker: dict[str, int] = field(default_factory=dict)
+    failed: int = 0
+    skipped_url_duplicate: int = 0      # URL 중복으로 스킵
+    skipped_content_duplicate: int = 0  # 컨텐츠 중복으로 스킵
+
+    @property
+    def total_skipped(self) -> int:
+        """총 스킵 수"""
+        return self.skipped_url_duplicate + self.skipped_content_duplicate
 
 class ReportScraper:
     def __init__(self, config: CollectionConfig, data_dir: Path):
         ...
 
     def run(self) -> CollectionStats:
-        """전체 수집 프로세스 실행"""
+        """전체 수집 프로세스 실행 (기존 메타데이터 기반 effective target 계산)"""
         ...
 
     def _fetch_page(self, page: int) -> str:
         """페이지 HTML 가져오기"""
         ...
 
-    def _should_continue(self, stats: CollectionStats) -> bool:
-        """수집 계속 여부 판단"""
+    def _should_stop(self, stats: CollectionStats, target: int) -> bool:
+        """수집 중단 여부 판단"""
+        ...
+
+    def _save_metadata_checkpoint(self) -> None:
+        """메타데이터 체크포인트 저장 (10개마다)"""
         ...
 ```
 
@@ -201,6 +229,92 @@ DEFAULT_MIN_BROKERS = 8
 DEFAULT_MIN_PER_BROKER = 5
 ```
 
+### 3.5 Metadata (`src/metadata.py`)
+
+메타데이터 관리 및 중복 제거를 담당한다.
+
+#### 중복 제거 전략
+1. **URL 중복 검사** (다운로드 전): 이미 수집된 PDF URL은 스킵
+2. **컨텐츠 중복 검사** (다운로드 후): MD5 해시가 동일한 파일은 스킵
+
+#### 인터페이스
+```python
+@dataclass
+class ReportMetadata:
+    """다운로드된 리포트 메타데이터."""
+    pdf_url: str
+    broker: str
+    stock_name: str
+    title: str
+    date: str           # yyyy-mm-dd 포맷
+    local_path: str     # 상대 경로 (예: "한화투자증권/2026-01-19_01.pdf")
+    file_hash: str      # 포맷: "md5:{hash}"
+    downloaded_at: str  # ISO 포맷 타임스탬프
+
+@dataclass
+class MetadataStore:
+    """메타데이터 저장소."""
+    reports: dict[str, ReportMetadata]  # pdf_url -> metadata
+    hashes: dict[str, str]              # file_hash -> pdf_url
+
+class MetadataManager:
+    def __init__(self, data_dir: Path):
+        ...
+
+    def is_duplicate_url(self, pdf_url: str) -> bool:
+        """URL이 이미 다운로드되었는지 확인"""
+        ...
+
+    def is_duplicate_hash(self, file_hash: str) -> bool:
+        """동일한 컨텐츠가 이미 존재하는지 확인"""
+        ...
+
+    def add_report(self, pdf_url: str, broker: str, ..., file_hash: str) -> ReportMetadata:
+        """새 리포트 메타데이터 추가"""
+        ...
+
+    def get_existing_report_by_hash(self, file_hash: str) -> ReportMetadata | None:
+        """해시로 기존 리포트 조회"""
+        ...
+
+    def save(self) -> None:
+        """메타데이터를 metadata.json에 저장"""
+        ...
+
+    def get_total_count(self) -> int:
+        """총 다운로드된 리포트 수"""
+        ...
+
+    def get_stats(self) -> dict[str, int]:
+        """증권사별 리포트 수 통계"""
+        ...
+
+def calculate_file_hash(content: bytes) -> str:
+    """파일 컨텐츠의 MD5 해시 계산. 반환 포맷: 'md5:{hash}'"""
+    ...
+```
+
+#### metadata.json 구조
+```json
+{
+  "reports": {
+    "https://...pdf": {
+      "pdf_url": "https://...",
+      "broker": "한화투자증권",
+      "stock_name": "삼성전자",
+      "title": "리포트 제목",
+      "date": "2026-01-19",
+      "local_path": "한화투자증권/2026-01-19_01.pdf",
+      "file_hash": "md5:abc123...",
+      "downloaded_at": "2026-01-19T15:30:00"
+    }
+  },
+  "hashes": {
+    "md5:abc123...": "https://...pdf"
+  }
+}
+```
+
 ## 4. 데이터 흐름
 
 ```
@@ -211,23 +325,40 @@ DEFAULT_MIN_PER_BROKER = 5
          │
          ▼
 ┌─────────────────┐
-│  Scraper        │
-│                 │
-└────────┬────────┘
+│  Scraper        │◄──────────┐
+│                 │           │
+└────────┬────────┘           │
+         │                    │
+    ┌────┼────┐               │
+    ▼    │    ▼               │
+┌───────┐│ ┌──────────┐  ┌────────────┐
+│Parser ││ │Downloader│──│  Metadata  │
+│       ││ │          │  │  Manager   │
+└───────┘│ └──────────┘  └────────────┘
+    │    │       │              │
+    ▼    │       ▼              ▼
+[리포트  │  [PDF 저장]    [metadata.json]
+ 목록]   │       │
+         │       ▼
+         │  ../data/{증권사}/
+         │  {date}_{seq}.pdf
          │
-    ┌────┴────┐
-    ▼         ▼
-┌───────┐  ┌──────────┐
-│Parser │  │Downloader│
-│       │  │          │
-└───────┘  └──────────┘
-    │            │
-    ▼            ▼
-[리포트 목록]  [PDF 저장]
-                 │
-                 ▼
-         ../data/{증권사}/
-         {date}_{seq}.pdf
+         └──[URL 중복 검사]
+```
+
+### 4.1 중복 제거 흐름
+
+```
+1. 페이지 스캔 시:
+   리포트 발견 → MetadataManager.is_duplicate_url() → 중복이면 스킵
+
+2. 다운로드 시:
+   PDF 다운로드 → calculate_file_hash() → MetadataManager.is_duplicate_hash()
+   → 중복이면 파일 저장하지 않고 스킵
+   → 신규면 파일 저장 + 메타데이터 추가
+
+3. 체크포인트:
+   10개 다운로드마다 metadata.json 저장 (중단 시 복구 가능)
 ```
 
 ## 5. 에러 처리
@@ -259,18 +390,24 @@ DEBUG: 상세 HTTP 요청/응답 정보
 
 ### 출력 예시
 ```
-[INFO] 수집 시작: 목표 500개, 최소 8개 증권사
+[INFO] 기존 메타데이터 로드: 100개 리포트
+[INFO] 수집 시작: 목표 500개 (기존 100개, 추가 400개 필요), 최소 8개 증권사
 [INFO] 페이지 1 스캔 완료: 15개 증권사 발견
-[INFO] [10/500] 삼성증권: 2025-01-15_01.pdf 다운로드 완료
-[INFO] [20/500] 미래에셋증권: 2025-01-15_01.pdf 다운로드 완료
+[INFO] [10/400] 증권사 8개, 실패 0개, 스킵 2개
+[INFO] [20/400] 증권사 10개, 실패 1개, 스킵 5개
 ...
-[INFO] === 수집 완료 ===
-[INFO] 총 다운로드: 500개
-[INFO] 증권사별 현황:
-       - 삼성증권: 65개
-       - 미래에셋증권: 63개
-       - ...
-[INFO] 실패: 3개, 스킵: 12개
+[INFO] ==================================================
+[INFO] 수집 완료
+[INFO] ==================================================
+[INFO] 총 다운로드: 400개
+[INFO] 실패: 3개
+[INFO] 스킵: 12개 (URL 중복: 8, 내용 중복: 4)
+[INFO] 증권사별 현황 (12개):
+[INFO]   - 삼성증권: 45개
+[INFO]   - 미래에셋증권: 42개
+[INFO]   - ...
+[INFO] 총 보유 리포트: 500개
+[INFO] 메타데이터 저장 완료
 ```
 
 ## 7. 테스트 케이스
@@ -313,8 +450,33 @@ def test_run_collects_minimum_brokers():
 def test_run_distributes_evenly():
     """Given: 목표 500개, When: 실행, Then: 증권사별 균등 분배"""
 
-def test_should_continue_stops_at_target():
-    """Given: 목표 도달, When: 체크, Then: False 반환"""
+def test_should_stop_at_target():
+    """Given: 목표 도달, When: 체크, Then: True 반환"""
+
+def test_skips_duplicate_urls():
+    """Given: 이미 다운로드된 URL, When: 다운로드 시도, Then: 스킵"""
+```
+
+### 7.4 Metadata 테스트 (`tests/test_metadata.py`)
+
+```python
+def test_add_report_stores_by_url_and_hash():
+    """Given: 리포트 메타데이터, When: 추가, Then: URL과 해시로 조회 가능"""
+
+def test_is_duplicate_url_detects_duplicates():
+    """Given: 기존 URL, When: 중복 검사, Then: True 반환"""
+
+def test_is_duplicate_hash_detects_duplicates():
+    """Given: 기존 해시, When: 중복 검사, Then: True 반환"""
+
+def test_save_creates_metadata_file():
+    """Given: 메타데이터, When: 저장, Then: JSON 파일 생성"""
+
+def test_loads_existing_metadata():
+    """Given: 기존 메타데이터 파일, When: 초기화, Then: 데이터 로드"""
+
+def test_calculate_file_hash_returns_md5_format():
+    """Given: 바이트 컨텐츠, When: 해시 계산, Then: 'md5:...' 포맷"""
 ```
 
 ## 8. 의존성
