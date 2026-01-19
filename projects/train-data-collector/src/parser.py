@@ -29,13 +29,10 @@ class ReportInfo:
         month = month.strip()
         day = day.strip()
 
-        # Convert 2-digit year to 4-digit
-        if len(year) == 2:
-            year_int = int(year)
-            # Assume years 00-99 map to 2000-2099
-            year = f"20{year:0>2}"
+        # Convert 2-digit year to 4-digit (assume 2000-2099)
+        full_year = f"20{year:0>2}" if len(year) == 2 else year
 
-        return f"{year}-{month:0>2}-{day:0>2}"
+        return f"{full_year}-{month:0>2}-{day:0>2}"
 
 
 def parse_report_list(html: str) -> list[ReportInfo]:
@@ -136,12 +133,12 @@ def get_total_pages(html: str) -> int:
     soup = BeautifulSoup(html, "lxml")
 
     # Find pagination table
-    paging = soup.find("table", class_="Nnavi")
-    if not paging:
+    pagination = soup.find("table", class_="Nnavi")
+    if not pagination:
         return 1
 
     # Find the "맨뒤" (last page) link
-    last_page_cell = paging.find("td", class_="pgRR")
+    last_page_cell = pagination.find("td", class_="pgRR")
     if not last_page_cell:
         return 1
 

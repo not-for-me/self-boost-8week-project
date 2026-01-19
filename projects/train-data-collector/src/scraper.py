@@ -16,11 +16,17 @@ from src.config import (
     DEFAULT_TOTAL_TARGET,
     REQUEST_TIMEOUT,
 )
+
 from src.downloader import PDFDownloader
 from src.metadata import MetadataManager
 from src.parser import ReportInfo, get_total_pages, parse_report_list
 
 logger = logging.getLogger(__name__)
+
+# Collection constants
+REPORT_COLLECTION_MULTIPLIER = 1.5  # Collect extra reports to account for failures
+PROGRESS_LOG_INTERVAL = 10  # Log progress every N downloads
+CHECKPOINT_SAVE_INTERVAL = 10  # Save metadata checkpoint every N downloads
 
 
 @dataclass
@@ -213,8 +219,7 @@ class ReportScraper:
             new_reports_count += 1
 
         # Continue scanning until we have enough new reports
-        # Estimate: need ~target * 1.5 reports to account for failures and distribution
-        target_reports = int(target * 1.5)
+        target_reports = int(target * REPORT_COLLECTION_MULTIPLIER)
         page = 2
 
         while new_reports_count < target_reports and page <= total_pages:
@@ -232,7 +237,7 @@ class ReportScraper:
                 reports_by_broker[report.broker].append(report)
                 new_reports_count += 1
 
-            if page % 10 == 0:
+            if page % PROGRESS_LOG_INTERVAL == 0:
                 logger.info(
                     f"페이지 {page} 스캔 완료: "
                     f"{new_reports_count}개 신규 리포트, {len(reports_by_broker)}개 증권사"
@@ -258,7 +263,7 @@ class ReportScraper:
             return
 
         brokers = list(reports_by_broker.keys())
-        broker_indices: dict[str, int] = {b: 0 for b in brokers}
+        broker_report_index: dict[str, int] = {broker: 0 for broker in brokers}
 
         # Phase 1: Minimum guarantee - ensure each broker gets min_per_broker
         logger.info(f"Phase 1: 증권사별 최소 {self.config.min_per_broker}개 수집")
@@ -269,12 +274,12 @@ class ReportScraper:
                     self._save_metadata_checkpoint()
                     return
 
-                idx = broker_indices[broker]
-                if idx >= len(reports):
+                report_index = broker_report_index[broker]
+                if report_index >= len(reports):
                     break
 
-                report = reports[idx]
-                broker_indices[broker] += 1
+                report = reports[report_index]
+                broker_report_index[broker] += 1
 
                 if self._download_report(report, stats):
                     self._log_progress(stats, target)
@@ -282,7 +287,8 @@ class ReportScraper:
         # Phase 2: Round-robin for remaining quota
         logger.info("Phase 2: 라운드 로빈 방식으로 추가 수집")
         active_brokers = [
-            b for b in brokers if broker_indices[b] < len(reports_by_broker[b])
+            broker for broker in brokers
+            if broker_report_index[broker] < len(reports_by_broker[broker])
         ]
 
         while active_brokers and not self._should_stop(stats, target):
@@ -292,14 +298,14 @@ class ReportScraper:
                     return
 
                 reports = reports_by_broker[broker]
-                idx = broker_indices[broker]
+                report_index = broker_report_index[broker]
 
-                if idx >= len(reports):
+                if report_index >= len(reports):
                     active_brokers.remove(broker)
                     continue
 
-                report = reports[idx]
-                broker_indices[broker] += 1
+                report = reports[report_index]
+                broker_report_index[broker] += 1
 
                 if self._download_report(report, stats):
                     self._log_progress(stats, target)
@@ -370,14 +376,13 @@ class ReportScraper:
 
     def _log_progress(self, stats: CollectionStats, target: int) -> None:
         """Log progress at regular intervals."""
-        if stats.total_downloaded % 10 == 0:
+        if stats.total_downloaded % PROGRESS_LOG_INTERVAL == 0:
             logger.info(
                 f"[{stats.total_downloaded}/{target}] "
                 f"증권사 {stats.get_unique_broker_count()}개, "
                 f"실패 {stats.failed}개, "
                 f"스킵 {stats.total_skipped}개"
             )
-            # Save checkpoint every 10 downloads
             self._save_metadata_checkpoint()
 
     def _log_final_stats(self, stats: CollectionStats) -> None:

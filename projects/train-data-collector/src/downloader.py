@@ -157,18 +157,18 @@ class PDFDownloader:
         formatted_date = report.get_formatted_date()
 
         # Find the highest existing sequence number for this date
-        max_seq = 0
+        max_sequence = 0
         pattern = re.compile(rf"^{re.escape(formatted_date)}_(\d+)\.pdf$")
 
         for filename in existing_files:
             match = pattern.match(filename)
             if match:
-                seq = int(match.group(1))
-                max_seq = max(max_seq, seq)
+                sequence_number = int(match.group(1))
+                max_sequence = max(max_sequence, sequence_number)
 
         # Next sequence number
-        next_seq = max_seq + 1
-        return f"{formatted_date}_{next_seq:02d}.pdf"
+        next_sequence = max_sequence + 1
+        return f"{formatted_date}_{next_sequence:02d}.pdf"
 
     def _wait_with_jitter(self) -> None:
         """Wait random time between downloads to avoid rate limiting."""
