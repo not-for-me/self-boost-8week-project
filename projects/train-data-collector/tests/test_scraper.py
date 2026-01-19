@@ -149,6 +149,70 @@ class TestCollectionStats:
         # Assert
         assert count == 3
 
+    def test_get_total_count_returns_sum_of_existing_and_downloaded(self):
+        """Given: existing count and downloads, When: get_total_count, Then: sum."""
+        # Arrange
+        stats = CollectionStats(existing_count=100)
+        stats.add_download("한화투자증권")
+        stats.add_download("미래에셋증권")
+
+        # Act
+        total = stats.get_total_count()
+
+        # Assert
+        assert total == 102
+
+    def test_get_total_count_with_zero_existing(self):
+        """Given: zero existing, When: get_total_count, Then: only downloaded."""
+        # Arrange
+        stats = CollectionStats()
+        stats.add_download("한화투자증권")
+
+        # Act
+        total = stats.get_total_count()
+
+        # Assert
+        assert total == 1
+
+    def test_get_total_broker_count_includes_existing(self):
+        """Given: existing brokers and new downloads, When: get_total_broker_count, Then: union."""
+        # Arrange
+        stats = CollectionStats(existing_brokers={"한화투자증권", "미래에셋증권"})
+        stats.add_download("키움증권")
+        stats.add_download("NH투자증권")
+
+        # Act
+        count = stats.get_total_broker_count()
+
+        # Assert
+        assert count == 4
+
+    def test_get_total_broker_count_deduplicates_overlapping_brokers(self):
+        """Given: overlapping brokers, When: get_total_broker_count, Then: unique count."""
+        # Arrange
+        stats = CollectionStats(existing_brokers={"한화투자증권", "미래에셋증권"})
+        stats.add_download("한화투자증권")  # Already in existing
+        stats.add_download("키움증권")
+
+        # Act
+        count = stats.get_total_broker_count()
+
+        # Assert
+        assert count == 3  # 한화, 미래에셋, 키움
+
+    def test_get_total_broker_count_with_no_existing(self):
+        """Given: no existing brokers, When: get_total_broker_count, Then: only session brokers."""
+        # Arrange
+        stats = CollectionStats()
+        stats.add_download("한화투자증권")
+        stats.add_download("미래에셋증권")
+
+        # Act
+        count = stats.get_total_broker_count()
+
+        # Assert
+        assert count == 2
+
 
 # =============================================================================
 # Tests: CollectionConfig

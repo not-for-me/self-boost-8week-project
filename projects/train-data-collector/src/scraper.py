@@ -42,6 +42,8 @@ class CollectionStats:
     failed: int = 0
     skipped_url_duplicate: int = 0
     skipped_content_duplicate: int = 0
+    existing_count: int = 0  # Count of reports already in metadata before session
+    existing_brokers: set[str] = field(default_factory=set)  # Brokers in metadata
 
     def add_download(self, broker: str) -> None:
         """Record a successful download."""
@@ -70,8 +72,17 @@ class CollectionStats:
         return self.by_broker.get(broker, 0)
 
     def get_unique_broker_count(self) -> int:
-        """Get number of unique brokers with downloads."""
+        """Get number of unique brokers with downloads in current session."""
         return len(self.by_broker)
+
+    def get_total_broker_count(self) -> int:
+        """Get total number of unique brokers including existing."""
+        all_brokers = self.existing_brokers | set(self.by_broker.keys())
+        return len(all_brokers)
+
+    def get_total_count(self) -> int:
+        """Get total count including existing reports."""
+        return self.existing_count + self.total_downloaded
 
 
 class ReportScraper:
@@ -132,11 +143,15 @@ class ReportScraper:
         if not self._downloader or not self._metadata:
             raise RuntimeError("Scraper must be used as context manager")
 
-        stats = CollectionStats()
-
         # Calculate effective target (subtract already downloaded)
         existing_count = self._metadata.get_total_count()
+        existing_brokers = self._metadata.get_brokers()
         effective_target = max(0, self.config.total_target - existing_count)
+
+        stats = CollectionStats(
+            existing_count=existing_count,
+            existing_brokers=existing_brokers,
+        )
 
         logger.info(
             f"수집 시작: 목표 {self.config.total_target}개 "

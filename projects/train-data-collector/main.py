@@ -111,16 +111,16 @@ def main() -> int:
             stats = scraper.run()
 
         # Check if minimum requirements were met
-        if stats.get_unique_broker_count() < config.min_brokers:
+        if stats.get_total_broker_count() < config.min_brokers:
             logger.warning(
                 f"최소 증권사 요건 미충족: "
-                f"{stats.get_unique_broker_count()}/{config.min_brokers}"
+                f"{stats.get_total_broker_count()}/{config.min_brokers}"
             )
             return 1
 
-        if stats.total_downloaded < config.total_target:
+        if stats.get_total_count() < config.total_target:
             logger.warning(
-                f"목표 수량 미달: {stats.total_downloaded}/{config.total_target}"
+                f"목표 수량 미달: {stats.get_total_count()}/{config.total_target}"
             )
             return 1
 

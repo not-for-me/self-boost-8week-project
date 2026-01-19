@@ -215,6 +215,14 @@ class MetadataManager:
         """Get total number of downloaded reports."""
         return len(self.store.reports)
 
+    def get_broker_count(self) -> int:
+        """Get number of unique brokers in metadata."""
+        return len(self.get_stats())
+
+    def get_brokers(self) -> set[str]:
+        """Get set of unique broker names in metadata."""
+        return set(self.get_stats().keys())
+
 
 def calculate_file_hash(content: bytes) -> str:
     """Calculate MD5 hash of file content.

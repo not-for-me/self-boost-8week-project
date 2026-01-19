@@ -315,6 +315,50 @@ class TestMetadataManager:
         assert stats["한화투자증권"] == 3
         assert stats["미래에셋증권"] == 1
 
+    def test_get_broker_count_returns_unique_count(self, temp_data_dir):
+        """Given: reports from multiple brokers, When: get_broker_count, Then: unique count."""
+        # Arrange
+        manager = MetadataManager(temp_data_dir)
+        brokers = ["한화투자증권", "한화투자증권", "미래에셋증권", "키움증권"]
+        for i, broker in enumerate(brokers):
+            manager.add_report(
+                pdf_url=f"https://example.com/test{i}.pdf",
+                broker=broker,
+                stock_name="테스트",
+                title="테스트 리포트",
+                date="2026-01-19",
+                local_path=f"{broker}/2026-01-19_0{i + 1}.pdf",
+                file_hash=f"md5:hash{i}",
+            )
+
+        # Act
+        count = manager.get_broker_count()
+
+        # Assert
+        assert count == 3  # 한화, 미래에셋, 키움
+
+    def test_get_brokers_returns_unique_set(self, temp_data_dir):
+        """Given: reports from multiple brokers, When: get_brokers, Then: unique set."""
+        # Arrange
+        manager = MetadataManager(temp_data_dir)
+        brokers = ["한화투자증권", "한화투자증권", "미래에셋증권"]
+        for i, broker in enumerate(brokers):
+            manager.add_report(
+                pdf_url=f"https://example.com/test{i}.pdf",
+                broker=broker,
+                stock_name="테스트",
+                title="테스트 리포트",
+                date="2026-01-19",
+                local_path=f"{broker}/2026-01-19_0{i + 1}.pdf",
+                file_hash=f"md5:hash{i}",
+            )
+
+        # Act
+        broker_set = manager.get_brokers()
+
+        # Assert
+        assert broker_set == {"한화투자증권", "미래에셋증권"}
+
 
 # =============================================================================
 # Tests: calculate_file_hash
