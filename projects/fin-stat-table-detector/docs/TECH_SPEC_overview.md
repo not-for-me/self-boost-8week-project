@@ -10,14 +10,15 @@
 
 - 최종 목표: 소형 LLM 기반 재무제표 QA 시스템 구축
 - 본 모듈의 역할: PDF에서 재무제표 영역을 탐지하는 첫 번째 단계
-- 문제점: pdfplumber 단독 사용 시 선 없는 표 탐지 불가
-- 해결책: 다중 탐지기 앙상블로 recall 향상
+- 문제점: 증권사 리포트는 이미지 기반 PDF가 많아 텍스트 추출이 어려움
+- 해결책: Docling ML 기반 탐지기 + OCR로 이미지 기반 PDF 지원
 
 ### 1.3 핵심 설계 원칙
 
-1. **다중 탐지기 앙상블**: 단일 라이브러리의 한계를 보완
-2. **재무제표 특화 분류**: 모든 표가 아닌 재무제표만 필터링
-3. **효율적 중복 제거**: Union-Find + Spatial Index로 O(n log n) 병합
+1. **ML 기반 탐지**: Docling으로 선 없는 표도 정확하게 탐지
+2. **OCR 지원**: 이미지 기반 PDF에서도 텍스트 추출 가능
+3. **재무제표 특화 분류**: 모든 표가 아닌 재무제표만 필터링
+4. **병렬 처리**: 대량 PDF 배치 처리 시 성능 최적화
 
 ---
 
@@ -42,25 +43,23 @@ projects/fin-stat-table-detector/
 │       ├── detectors/
 │       │   ├── __init__.py
 │       │   ├── base.py            # AbstractDetector 인터페이스
-│       │   ├── pdfplumber_det.py  # PdfplumberDetector
-│       │   ├── camelot_det.py     # CamelotDetector (lattice + stream)
-│       │   └── docling_det.py     # DoclingDetector (ML 기반)
+│       │   └── docling_det.py     # DoclingDetector (ML 기반 + OCR)
 │       ├── classifiers/
 │       │   ├── __init__.py
+│       │   ├── constants.py       # 재무제표 키워드 상수
 │       │   └── financial.py       # FinancialTableClassifier
-│       ├── utils/
-│       │   ├── __init__.py
-│       │   ├── union_find.py      # UnionFind 자료구조
-│       │   └── spatial_index.py   # SpatialIndex (Interval Tree 기반)
-│       └── ensemble.py            # EnsembleDetector (통합 + 중복 제거)
+│       ├── exporters/
+│       │   ├── converters.py      # 좌표 변환 유틸리티
+│       │   └── label_studio.py    # Label Studio JSON 내보내기
+│       ├── cli/
+│       │   ├── main.py            # CLI 진입점
+│       │   └── commands/
+│       │       └── detect.py      # detect 명령어
+│       └── utils/
+│           ├── union_find.py      # UnionFind 자료구조
+│           └── spatial_index.py   # SpatialIndex (Interval Tree 기반)
 └── tests/
-    ├── __init__.py
-    ├── test_models.py
-    ├── test_detectors.py
-    ├── test_classifier.py
-    ├── test_union_find.py
-    ├── test_spatial_index.py
-    └── test_ensemble.py
+    └── ...
 ```
 
 ### 2.2 데이터 흐름
@@ -74,14 +73,13 @@ projects/fin-stat-table-detector/
 ┌──────────────────────────────────────────┐
 │           EnsembleDetector               │
 │  ┌─────────────────────────────────────┐ │
-│  │         1. 다중 탐지기 실행          │ │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────┐ ┌───────┐ │ │
-│  │  │pdfplumber│ │ camelot  │ │camelot│ │docling│ │ │
-│  │  │          │ │ lattice  │ │stream │ │ (ML)  │ │ │
-│  │  └────┬─────┘ └────┬─────┘ └───┬──┘ └───┬───┘ │ │
-│  │       │            │           │        │     │ │
-│  │       └────────────┴───────────┴────────┘     │ │
-│  │                    ▼                │ │
+│  │         1. Docling 탐지기 실행       │ │
+│  │  ┌────────────────────────────────┐ │ │
+│  │  │   DoclingDetector (ML + OCR)   │ │ │
+│  │  │   - force_full_page_ocr=True   │ │ │
+│  │  │   - 이미지 기반 PDF 지원        │ │ │
+│  │  └────────────────┬───────────────┘ │ │
+│  │                   ▼                 │ │
 │  │         TableCandidate[]            │ │
 │  └─────────────────────────────────────┘ │
 │  ┌─────────────────────────────────────┐ │
@@ -105,14 +103,7 @@ projects/fin-stat-table-detector/
 
 ---
 
-## 3. 탐지기 비교
-
-| 탐지기 | 강점 | 약점 |
-|--------|------|------|
-| pdfplumber | 선 기반 표 정확도 높음, 가벼움 | 선 없는 표 탐지 불가 |
-| camelot (lattice) | 격자형 표 정확 | 설치 의존성 복잡 (ghostscript) |
-| camelot (stream) | 선 없는 표 탐지 가능 | false positive 많음 |
-| **docling** | ML 기반 레이아웃 분석, 가장 정확 | 무거움 (모델 다운로드 필요), 느림 |
+## 3. Docling 탐지기
 
 ### 3.1 Docling 소개
 
@@ -122,24 +113,24 @@ projects/fin-stat-table-detector/
 - ML 레이아웃 모델(YOLO/DETR 계열)로 선 없는 표도 탐지
 - 테이블 구조 인식(Table Structure Recognition)까지 내장
 - pandas DataFrame으로 직접 export 가능
-- 내부적으로 Union-Find + Spatial Index로 중복 bbox 정리
+- OCR 내장으로 이미지 기반 PDF 지원
 
 **단점**:
 - 첫 실행 시 모델 다운로드 (~2.5분)
 - 처리 속도가 rule-based 대비 느림
 - GPU 없으면 대량 처리 시 병목
 
-### 3.2 앙상블 전략
+### 3.2 OCR 지원
 
-각 탐지기의 결과를 수집하고, IoU 기반으로 중복을 제거하여 recall을 극대화
+이미지 기반 PDF(텍스트가 이미지로 렌더링된 PDF)를 처리하기 위해 `force_full_page_ocr=True` 옵션을 기본으로 사용합니다.
 
-**권장 사용 전략 (Fallback)**:
-```
-1차: pdfplumber + camelot (빠름, rule-based)
-    ↓
-2차: 1차에서 재무제표 키워드 없으면 docling으로 재시도 (ML 기반)
-    ↓
-최종: Union-Find로 모든 결과 병합
+```python
+from docling.datamodel.pipeline_options import OcrAutoOptions, PdfPipelineOptions
+
+pipeline_options = PdfPipelineOptions(
+    do_ocr=True,
+    ocr_options=OcrAutoOptions(force_full_page_ocr=True),
+)
 ```
 
 ---
@@ -150,48 +141,51 @@ projects/fin-stat-table-detector/
 [project]
 name = "fin-stat-table-detector"
 version = "0.1.0"
-requires-python = ">=3.12"
+requires-python = ">=3.13,<3.14"
 dependencies = [
-    "pdfplumber>=0.10.0",
-    "camelot-py[cv]>=0.11.0",  # OpenCV 포함
-    "ghostscript",              # camelot 의존성
-    "intervaltree>=3.1.0",      # Spatial Index용
+    "click>=8.0.0",
+    "docling>=2.0.0",
+    "intervaltree>=3.1.0",
+    "opencv-contrib-python-headless>=4.0.0",
+    "pdf2image>=1.16.0",
+    "pypdf>=5.0.0",
+    "rich>=13.0.0",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "pytest>=8.0.0",
     "pytest-cov>=4.0.0",
 ]
-# Docling은 무거우므로 optional로 분리
-ml = [
-    "docling>=2.0.0",           # ML 기반 테이블 탐지
-]
 ```
 
-**설치 옵션**:
+**시스템 의존성**:
 ```bash
-# 기본 (rule-based만)
-uv sync
+# macOS
+brew install poppler
 
-# ML 기반 포함
-uv sync --extra ml
+# Ubuntu/Debian
+sudo apt install poppler-utils
+```
+
+**설치**:
+```bash
+uv sync
 ```
 
 ---
 
-## 5. 사용 예시
+## 5. CLI 사용법
 
-### 5.1 기본 사용 (Rule-based만)
+### 5.1 기본 사용
 
 ```python
-from fin_stat_table_detector import EnsembleDetector, PdfplumberDetector, CamelotDetector
+from fin_stat_table_detector import EnsembleDetector
+from fin_stat_table_detector.detectors import DoclingDetector
 
-# 탐지기 초기화 (빠름)
+# 탐지기 초기화
 detector = EnsembleDetector([
-    PdfplumberDetector(),
-    CamelotDetector(flavor="lattice"),
-    CamelotDetector(flavor="stream"),
+    DoclingDetector(force_ocr=True),  # OCR 활성화 (기본값)
 ])
 
 # 재무제표 탐지
@@ -204,50 +198,69 @@ for table in results:
     print(f"  매칭 키워드: {table.matched_keywords}")
 ```
 
-### 5.2 ML 기반 포함 (Docling)
+### 5.2 CLI 명령어
 
-```python
-from fin_stat_table_detector import EnsembleDetector, PdfplumberDetector, DoclingDetector
+```bash
+# 단일 PDF 처리
+fin-stat-detect detect report.pdf
 
-# Docling 포함 (더 정확하지만 느림)
-detector = EnsembleDetector([
-    PdfplumberDetector(),
-    DoclingDetector(),  # ML 기반 - 선 없는 표도 탐지
-])
+# 디렉토리 배치 처리
+fin-stat-detect detect ./data/
 
-results = detector.detect_financial_tables("report.pdf")
+# 병렬 처리 (4 workers)
+fin-stat-detect detect ./data/ --parallel --workers 4
+
+# 요약만 출력 (이미지 생성 없음)
+fin-stat-detect detect report.pdf --summary-only
+
+# 처리 대상 미리보기
+fin-stat-detect detect ./data/ --dry-run
 ```
 
-### 5.3 Fallback 전략 (권장)
+### 5.3 CLI 옵션
 
-```python
-from fin_stat_table_detector import (
-    EnsembleDetector,
-    PdfplumberDetector,
-    CamelotDetector,
-    DoclingDetector,
-)
-from fin_stat_table_detector.models import FinancialTable
+| 옵션 | 단축 | 설명 | 기본값 |
+|------|------|------|--------|
+| `--output` | `-o` | 출력 JSON 파일 경로 | `<input>_labels.json` |
+| `--images-dir` | `-i` | 이미지 저장 디렉토리 | `./images/` |
+| `--dpi` | | 이미지 해상도 | `150` |
+| `--dry-run` | | 처리 대상만 표시 | `False` |
+| `--summary-only` | `-s` | 요약만 출력 (이미지 생성 안 함) | `False` |
+| `--parallel` | `-p` | 병렬 처리 활성화 | `False` |
+| `--workers` | `-w` | 워커 프로세스 수 | CPU 코어 수 |
 
-def detect_with_fallback(pdf_path: str) -> list[FinancialTable]:
-    """
-    1차: Rule-based (빠름)
-    2차: 재무제표 못 찾으면 Docling으로 재시도 (정확함)
-    """
-    # 1차 시도: Rule-based
-    fast_detector = EnsembleDetector([
-        PdfplumberDetector(),
-        CamelotDetector(flavor="lattice"),
-    ])
-    results = fast_detector.detect_financial_tables(pdf_path)
+### 5.4 병렬 처리
 
-    if results:
-        return results
+대량의 PDF를 처리할 때 `--parallel` 옵션을 사용하면 여러 파일을 동시에 처리할 수 있습니다.
 
-    # 2차 시도: ML 기반 (Docling)
-    print(f"Rule-based 탐지 실패, Docling으로 재시도...")
-    ml_detector = EnsembleDetector([DoclingDetector()])
-    return ml_detector.detect_financial_tables(pdf_path)
+```bash
+fin-stat-detect detect ./data/ --parallel --workers 4 --summary-only
+```
+
+출력 형식 (패키지 인스톨러 스타일):
+```
+Using detectors: docling
+Workers: 4
+
+Processing 44 files with 4 workers...
+
+✓ 2025-12-10_01.pdf (6 pages, 2 tables)
+✓ 2025-12-10_02.pdf (7 pages, 2 tables)
+◐ 2025-12-10_03.pdf
+  2025-12-11_01.pdf
+  ...
+
+[44/44]
+
+                 Detection Summary
+┏━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━┓
+┃ PDF               ┃ Pages ┃ Tables ┃ Categories  ┃
+┡━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━┩
+│ 2025-12-10_01.pdf │     6 │      2 │ valuation:2 │
+...
+└───────────────────┴───────┴────────┴─────────────┘
+
+Elapsed time: 123.45s
 ```
 
 ---
@@ -256,17 +269,16 @@ def detect_with_fallback(pdf_path: str) -> list[FinancialTable]:
 
 1. **Phase 1**: 데이터 모델 구현 (`models.py`)
 2. **Phase 2**: 유틸리티 구현 (`union_find.py`, `spatial_index.py`)
-3. **Phase 3**: PdfplumberDetector 구현
-4. **Phase 4**: CamelotDetector 구현 (lattice + stream)
-5. **Phase 5**: DoclingDetector 구현 (ML 기반, optional)
-6. **Phase 6**: FinancialTableClassifier 구현
-7. **Phase 7**: EnsembleDetector 구현 (통합 + 중복 제거)
-8. **Phase 8**: 통합 테스트 및 샘플 PDF 검증
+3. **Phase 3-5**: DoclingDetector 구현 (ML 기반 + OCR)
+4. **Phase 6**: FinancialTableClassifier 구현
+5. **Phase 7**: EnsembleDetector 구현 (통합 + 중복 제거)
+6. **Phase 8**: CLI 구현 (detect 명령어, 병렬 처리)
+7. **Phase 9**: Label Studio 내보내기 구현
 
 ---
 
 ## 7. 테스트 데이터
 
 기존 수집된 PDF는 `train-data-collector` 프로젝트에서 수집된 파일 사용:
-- 경로: `projects/train-data-collector/data/reports/`
-- 증권사: 삼성증권, 하나증권, 미래에셋, 교보증권, 대신증권 등
+- 경로: `projects/data/`
+- 증권사: 미래에셋증권, 한화투자증권, 삼성증권, iM증권 등

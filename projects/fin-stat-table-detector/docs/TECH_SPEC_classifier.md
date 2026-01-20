@@ -21,13 +21,15 @@
 
 ## 3. 재무제표 키워드 사전
 
+OCR 결과의 변형을 고려하여 다양한 형태의 키워드를 포함합니다.
+
 ```python
 FINANCIAL_STATEMENT_PATTERNS = {
     # 손익계산서 (Income Statement)
     "income_statement": {
         "keywords": [
             "매출액", "매출원가", "매출총이익", "영업이익", "영업외손익",
-            "세전이익", "법인세", "당기순이익", "지배주주순이익", "순이익"
+            "세전순이익", "법인세", "당기순이익", "지배주주순이익", "순이익"
         ],
         "weight": 1.0,
         "min_matches": 2
@@ -53,8 +55,12 @@ FINANCIAL_STATEMENT_PATTERNS = {
     # 투자지표 (Valuation Metrics)
     "valuation": {
         "keywords": [
-            "EPS", "BPS", "PER", "PBR", "ROE", "ROA", "EBITDA",
-            "EV/EBITDA", "배당수익률", "DPS"
+            "EPS", "BPS", "CFPS",       # Per Share 지표
+            "PER", "PBR", "PCR",         # 배수 지표 (한글 약어)
+            "P/E", "P/B", "P/CF",        # 배수 지표 (OCR 변형)
+            "ROE", "ROA", "ROIC",        # 수익성 지표
+            "EBITDA", "EV/EBITDA", "EV/EBIT",  # EV 관련
+            "배당수익률", "DPS"
         ],
         "weight": 0.8,  # 단독으로는 재무제표가 아닐 수 있음
         "min_matches": 3
@@ -79,6 +85,17 @@ FINANCIAL_STATEMENT_PATTERNS = {
 | cash_flow | 1.0 | 2 | 핵심 재무제표 |
 | valuation | 0.8 | 3 | 투자지표만으로는 약한 신호 |
 | performance | 0.5 | 2 | 보조 지표 |
+
+### OCR 변형 처리
+
+증권사 리포트의 OCR 결과에서 흔히 나타나는 변형을 처리하기 위해 다양한 형태의 키워드를 포함합니다:
+
+| 원래 형태 | OCR 변형 | 둘 다 포함 |
+|----------|---------|-----------|
+| PER | P/E, P/E(x) | ✓ |
+| PBR | P/B, P/B(x) | ✓ |
+| PCR | P/CF | ✓ |
+| CFPS | Cash Flow Per Share | CFPS만 |
 
 ---
 
@@ -203,126 +220,23 @@ class FinancialTableClassifier:
             detector_source=candidate.detector
         )
 
-    def _calculate_keyword_score(
-        self,
-        text: str
-    ) -> tuple[str | None, float, list[str]]:
-        """
-        키워드 매칭 점수 계산
-
-        Returns:
-            (best_category, confidence, matched_keywords)
-        """
-        scores = {}
-        all_matched = {}
-
-        for category, config in FINANCIAL_STATEMENT_PATTERNS.items():
-            matched = [kw for kw in config["keywords"] if kw in text]
-            if len(matched) >= config["min_matches"]:
-                scores[category] = len(matched) * config["weight"]
-                all_matched[category] = matched
-
-        if not scores:
-            return None, 0.0, []
-
-        best_category = max(scores, key=scores.get)
-        # confidence: 매칭 키워드 수에 따라 0.0 ~ 1.0
-        confidence = min(scores[best_category] / 6.0, 1.0)
-
-        return best_category, confidence, all_matched[best_category]
-
-    def _check_numeric_density(
-        self,
-        text: str,
-        threshold: float | None = None
-    ) -> bool:
-        """
-        텍스트 내 숫자 토큰 비율 계산
-        재무제표는 보통 20% 이상이 숫자
-        """
-        threshold = threshold or self.numeric_density_threshold
-
-        tokens = text.split()
-        if not tokens:
-            return False
-
-        numeric_pattern = r'^[\d,.\-+()%]+$'
-        numeric_count = sum(1 for t in tokens if re.match(numeric_pattern, t))
-
-        return (numeric_count / len(tokens)) >= threshold
-
-    def _check_temporal_columns(
-        self,
-        text: str,
-        min_matches: int | None = None
-    ) -> bool:
-        """
-        연도/분기 패턴이 지정된 개수 이상 있는지 확인
-        """
-        min_matches = min_matches or self.min_temporal_matches
-        total_matches = 0
-
-        for pattern in TEMPORAL_PATTERNS:
-            matches = re.findall(pattern, text)
-            total_matches += len(set(matches))  # 중복 제거
-
-        return total_matches >= min_matches
-
-    def _is_valid_table_size(
-        self,
-        bbox: BBox,
-        page_width: float,
-        page_height: float,
-        row_count: int | None,
-        col_count: int | None,
-        min_area_ratio: float = 0.05,
-        max_area_ratio: float = 0.95
-    ) -> bool:
-        """
-        표 크기가 유효한지 확인
-        - 최소 3행 2열
-        - 페이지의 5% ~ 95% 크기
-        """
-        # 행/열 수 체크
-        if row_count is not None and row_count < 3:
-            return False
-        if col_count is not None and col_count < 2:
-            return False
-
-        # 면적 비율 체크
-        page_area = page_width * page_height
-        table_area = bbox.area
-        ratio = table_area / page_area
-
-        return min_area_ratio <= ratio <= max_area_ratio
-
-    def _calculate_final_confidence(
-        self,
-        keyword_score: float,
-        has_temporal: bool
-    ) -> float:
-        """최종 신뢰도 계산"""
-        confidence = keyword_score
-
-        # 시계열 컬럼이 있으면 보너스
-        if has_temporal:
-            confidence = min(confidence + 0.1, 1.0)
-
-        return confidence
-
     def _extract_text_from_bbox(
         self,
         pdf_path: str,
         page: int,
         bbox: BBox
     ) -> str:
-        """bbox 영역의 텍스트 추출"""
-        import pdfplumber
+        """bbox 영역의 텍스트 추출 (pypdf 사용)
 
-        with pdfplumber.open(pdf_path) as pdf:
-            page_obj = pdf.pages[page - 1]
-            cropped = page_obj.within_bbox((bbox.x0, bbox.y0, bbox.x1, bbox.y1))
-            text = cropped.extract_text() or ""
+        Note: pypdf는 bbox 기반 추출을 지원하지 않으므로
+        전체 페이지 텍스트를 반환합니다. 키워드 매칭은
+        텍스트 내 패턴 검색으로 동작합니다.
+        """
+        from pypdf import PdfReader
+
+        reader = PdfReader(pdf_path)
+        page_obj = reader.pages[page - 1]
+        text = page_obj.extract_text() or ""
 
         return text
 ```
@@ -347,6 +261,7 @@ class FinancialTableClassifier:
             │                 │
             │         ┌───────▼───────┐
             │         │  PDF에서 추출  │
+            │         │  (pypdf)      │
             │         └───────┬───────┘
             │                 │
             └────────┬────────┘
@@ -408,18 +323,21 @@ class TestKeywordMatching:
         assert "매출액" in keywords
         assert "영업이익" in keywords
 
-    def test_balance_sheet_detection(self):
-        """재무상태표 키워드가 있으면 balance_sheet로 분류"""
+    def test_valuation_with_ocr_variants(self):
+        """OCR 변형 키워드도 인식"""
         # Given
-        text = "자산총계 10,000 부채총계 5,000 자본총계 5,000"
+        text = "P/E 10.5 P/B 1.2 ROE 15% EPS 1,234"
         classifier = FinancialTableClassifier()
 
         # When
-        category, _, keywords = classifier._calculate_keyword_score(text)
+        category, confidence, keywords = classifier._calculate_keyword_score(text)
 
         # Then
-        assert category == "balance_sheet"
-        assert "자산총계" in keywords
+        assert category == "valuation"
+        assert "P/E" in keywords
+        assert "P/B" in keywords
+        assert "ROE" in keywords
+        assert "EPS" in keywords
 
     def test_no_match_returns_none(self):
         """매칭 키워드가 부족하면 None 반환"""
@@ -463,17 +381,6 @@ class TestNumericDensity:
 
         # Then
         assert result is False
-
-    def test_empty_text_returns_false(self):
-        """빈 텍스트는 False 반환"""
-        # Given
-        classifier = FinancialTableClassifier()
-
-        # When
-        result = classifier._check_numeric_density("")
-
-        # Then
-        assert result is False
 ```
 
 ### 7.3 시계열 패턴 테스트
@@ -494,18 +401,6 @@ class TestTemporalPatterns:
         # Then
         assert result is True
 
-    def test_single_temporal_not_enough(self):
-        """시계열 패턴 1개는 부족"""
-        # Given
-        text = "항목 2024"
-        classifier = FinancialTableClassifier()
-
-        # When
-        result = classifier._check_temporal_columns(text)
-
-        # Then
-        assert result is False
-
     def test_korean_quarter_pattern(self):
         """한국어 분기 패턴 인식"""
         # Given
@@ -519,71 +414,11 @@ class TestTemporalPatterns:
         assert result is True
 ```
 
-### 7.4 표 크기 테스트
-
-```python
-class TestTableSize:
-    """표 크기 유효성 테스트"""
-
-    def test_valid_table_size(self):
-        """유효한 크기의 표는 통과"""
-        # Given
-        bbox = BBox(50, 100, 500, 400)  # 면적: 450 * 300 = 135,000
-        classifier = FinancialTableClassifier()
-
-        # When
-        result = classifier._is_valid_table_size(
-            bbox,
-            page_width=600,
-            page_height=800,
-            row_count=10,
-            col_count=5
-        )
-
-        # Then
-        assert result is True  # 135,000 / 480,000 = 28%
-
-    def test_too_small_table_fails(self):
-        """너무 작은 표는 실패 (5% 미만)"""
-        # Given
-        bbox = BBox(0, 0, 50, 50)  # 면적: 2,500
-        classifier = FinancialTableClassifier()
-
-        # When
-        result = classifier._is_valid_table_size(
-            bbox,
-            page_width=600,
-            page_height=800,
-            row_count=10,
-            col_count=5
-        )
-
-        # Then
-        assert result is False  # 2,500 / 480,000 = 0.5%
-
-    def test_too_few_rows_fails(self):
-        """행이 3개 미만이면 실패"""
-        # Given
-        bbox = BBox(50, 100, 500, 400)
-        classifier = FinancialTableClassifier()
-
-        # When
-        result = classifier._is_valid_table_size(
-            bbox,
-            page_width=600,
-            page_height=800,
-            row_count=2,  # 2행
-            col_count=5
-        )
-
-        # Then
-        assert result is False
-```
-
 ---
 
 ## 8. 구현 파일
 
-- **위치**: `src/fin_stat_table_detector/classifiers/financial.py`
-- **상수 파일**: `src/fin_stat_table_detector/classifiers/constants.py` (키워드, 패턴 분리 가능)
-- **의존성**: pdfplumber (텍스트 추출용), re (정규표현식)
+- **위치**: `src/fin_stat_table_detector/classifiers/`
+  - `constants.py`: 키워드, 패턴 상수
+  - `financial.py`: FinancialTableClassifier
+- **의존성**: pypdf (텍스트 추출용), re (정규표현식)
