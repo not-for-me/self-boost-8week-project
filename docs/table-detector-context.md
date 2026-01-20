@@ -19,9 +19,51 @@
 
 | 탐지기 | 강점 | 약점 |
 |--------|------|------|
-| pdfplumber | 선 기반 표 정확도 높음 | 선 없는 표 탐지 불가 |
-| camelot (lattice) | 격자형 표 정확 | 설치 의존성 복잡 |
+| pdfplumber | 선 기반 표 정확도 높음, 가벼움 | 선 없는 표 탐지 불가 |
+| camelot (lattice) | 격자형 표 정확 | 설치 의존성 복잡 (ghostscript) |
 | camelot (stream) | 선 없는 표 탐지 가능 | false positive 많음 |
+| **docling** | ML 기반 레이아웃 분석, 가장 정확 | 무거움 (모델 다운로드 필요), 느림 |
+
+### Docling 소개
+
+[Docling](https://docling-project.github.io/docling/)은 IBM Research에서 개발한 AI 기반 문서 파싱 도구입니다.
+
+**장점**:
+- ML 레이아웃 모델(YOLO/DETR 계열)로 선 없는 표도 탐지
+- 테이블 구조 인식(Table Structure Recognition)까지 내장
+- pandas DataFrame으로 직접 export 가능
+- 내부적으로 Union-Find + Spatial Index로 중복 bbox 정리
+
+**단점**:
+- 첫 실행 시 모델 다운로드 (~2.5분)
+- 처리 속도가 rule-based 대비 느림
+- GPU 없으면 대량 처리 시 병목
+
+**사용 예시**:
+```python
+from docling.document_converter import DocumentConverter
+
+converter = DocumentConverter()
+result = converter.convert("report.pdf")
+
+# 테이블 순회
+for table in result.document.tables:
+    df = table.export_to_dataframe()
+    print(df.to_markdown())
+    
+    # bbox 정보 접근
+    bbox = table.prov[0].bbox  # (x0, y0, x1, y1)
+    page = table.prov[0].page_no
+```
+
+**권장 사용 전략**:
+```
+1차: pdfplumber + camelot (빠름, rule-based)
+    ↓
+2차: 1차에서 재무제표 키워드 없으면 docling으로 재시도 (ML 기반)
+    ↓
+최종: Union-Find로 모든 결과 병합
+```
 
 ### 2. 재무제표 분류 로직
 
@@ -165,7 +207,8 @@ projects/table-detector/
 │       │   ├── __init__.py
 │       │   ├── base.py            # AbstractDetector 인터페이스
 │       │   ├── pdfplumber_det.py  # PdfplumberDetector
-│       │   └── camelot_det.py     # CamelotDetector (lattice + stream)
+│       │   ├── camelot_det.py     # CamelotDetector (lattice + stream)
+│       │   └── docling_det.py     # DoclingDetector (ML 기반)
 │       ├── classifiers/
 │       │   ├── __init__.py
 │       │   └── financial.py       # FinancialTableClassifier
@@ -288,10 +331,12 @@ class EnsembleDetector:
 
 ## 사용 예시
 
+### 기본 사용 (Rule-based만)
+
 ```python
 from table_detector import EnsembleDetector, PdfplumberDetector, CamelotDetector
 
-# 탐지기 초기화
+# 탐지기 초기화 (빠름)
 detector = EnsembleDetector([
     PdfplumberDetector(),
     CamelotDetector(flavor="lattice"),
@@ -306,6 +351,145 @@ for table in results:
     print(f"  위치: ({table.bbox.x0}, {table.bbox.y0}) - ({table.bbox.x1}, {table.bbox.y1})")
     print(f"  신뢰도: {table.confidence:.2f}")
     print(f"  매칭 키워드: {table.matched_keywords}")
+```
+
+### ML 기반 포함 (Docling)
+
+```python
+from table_detector import EnsembleDetector, PdfplumberDetector, DoclingDetector
+
+# Docling 포함 (더 정확하지만 느림)
+detector = EnsembleDetector([
+    PdfplumberDetector(),
+    DoclingDetector(),  # ML 기반 - 선 없는 표도 탐지
+])
+
+results = detector.detect_financial_tables("report.pdf")
+```
+
+### Fallback 전략 (권장)
+
+```python
+from table_detector import (
+    EnsembleDetector, 
+    PdfplumberDetector, 
+    CamelotDetector,
+    DoclingDetector,
+    FinancialTableClassifier
+)
+
+def detect_with_fallback(pdf_path: str) -> list[FinancialTable]:
+    """
+    1차: Rule-based (빠름)
+    2차: 재무제표 못 찾으면 Docling으로 재시도 (정확함)
+    """
+    # 1차 시도: Rule-based
+    fast_detector = EnsembleDetector([
+        PdfplumberDetector(),
+        CamelotDetector(flavor="lattice"),
+    ])
+    results = fast_detector.detect_financial_tables(pdf_path)
+    
+    if results:
+        return results
+    
+    # 2차 시도: ML 기반 (Docling)
+    print(f"Rule-based 탐지 실패, Docling으로 재시도...")
+    ml_detector = EnsembleDetector([DoclingDetector()])
+    return ml_detector.detect_financial_tables(pdf_path)
+```
+
+---
+
+## DoclingDetector 구현
+
+```python
+# src/table_detector/detectors/docling_det.py
+
+from typing import Optional
+from ..models import BBox, TableCandidate
+from .base import AbstractDetector
+
+class DoclingDetector(AbstractDetector):
+    """Docling(IBM) ML 기반 테이블 탐지기"""
+    
+    def __init__(self):
+        self._converter = None  # lazy loading
+    
+    @property
+    def name(self) -> str:
+        return "docling"
+    
+    def _get_converter(self):
+        """Lazy loading - 첫 사용 시에만 모델 로드"""
+        if self._converter is None:
+            try:
+                from docling.document_converter import DocumentConverter
+                self._converter = DocumentConverter()
+            except ImportError:
+                raise ImportError(
+                    "docling이 설치되지 않았습니다. "
+                    "`uv sync --extra ml` 또는 `pip install docling`으로 설치하세요."
+                )
+        return self._converter
+    
+    def detect(
+        self, 
+        pdf_path: str, 
+        pages: Optional[list[int]] = None
+    ) -> list[TableCandidate]:
+        """
+        Docling으로 테이블 탐지
+        
+        Note: Docling은 전체 문서를 처리하므로 pages 필터는 후처리로 적용
+        """
+        converter = self._get_converter()
+        result = converter.convert(pdf_path)
+        
+        candidates = []
+        
+        for table in result.document.tables:
+            # bbox와 페이지 정보 추출
+            if not table.prov:
+                continue
+                
+            prov = table.prov[0]
+            page_no = prov.page_no  # 1-indexed
+            
+            # pages 필터 적용
+            if pages is not None and page_no not in pages:
+                continue
+            
+            # bbox 추출 (docling은 (l, t, r, b) 형식)
+            bbox_data = prov.bbox
+            bbox = BBox(
+                x0=bbox_data.l,
+                y0=bbox_data.t,
+                x1=bbox_data.r,
+                y1=bbox_data.b
+            )
+            
+            # DataFrame으로 텍스트 추출
+            try:
+                df = table.export_to_dataframe()
+                text_content = df.to_string()
+                row_count = len(df)
+                col_count = len(df.columns)
+            except Exception:
+                text_content = None
+                row_count = None
+                col_count = None
+            
+            candidates.append(TableCandidate(
+                page=page_no,
+                bbox=bbox,
+                detector=self.name,
+                row_count=row_count,
+                col_count=col_count,
+                text_content=text_content
+            ))
+        
+        return candidates
 ```
 
 ---
@@ -838,6 +1022,19 @@ dev = [
     "pytest>=8.0.0",
     "pytest-cov>=4.0.0",
 ]
+# Docling은 무거우므로 optional로 분리
+ml = [
+    "docling>=2.0.0",           # ML 기반 테이블 탐지
+]
+```
+
+**설치 옵션**:
+```bash
+# 기본 (rule-based만)
+uv sync
+
+# ML 기반 포함
+uv sync --extra ml
 ```
 
 ---
