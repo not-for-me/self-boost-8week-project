@@ -5,10 +5,17 @@ description = "Financial statement table detector for PDF reports"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "camelot-py[cv]>=0.11.0",
+    "camelot-py>=0.11.0",
+    "click>=8.0.0",
     "intervaltree>=3.1.0",
+    "opencv-python>=4.0.0",
+    "pdf2image>=1.16.0",
     "pdfplumber>=0.10.0",
+    "rich>=13.0.0",
 ]
+
+[project.scripts]
+fin-stat-detect = "fin_stat_table_detector.cli.main:main"
 
 [project.optional-dependencies]
 ml = [
