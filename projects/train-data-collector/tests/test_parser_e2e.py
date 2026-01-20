@@ -7,8 +7,8 @@ Run with: uv run pytest tests/test_parser_e2e.py -v -s
 import pytest
 import httpx
 
-from src.config import BASE_URL, DEFAULT_HEADERS
-from src.parser import (
+from train_data_collector.config import BASE_URL, DEFAULT_HEADERS
+from train_data_collector.parser import (
     ReportInfo,
     get_total_pages,
     get_unique_brokers,

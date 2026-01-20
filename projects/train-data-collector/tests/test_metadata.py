@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from src.metadata import (
+from train_data_collector.metadata import (
     MetadataManager,
     MetadataStore,
     ReportMetadata,

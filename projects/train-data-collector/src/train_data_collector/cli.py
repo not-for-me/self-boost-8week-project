@@ -5,13 +5,13 @@ import logging
 import sys
 from pathlib import Path
 
-from src.config import (
+from train_data_collector.config import (
     DEFAULT_DELAY_RANGE,
     DEFAULT_MIN_BROKERS,
     DEFAULT_MIN_PER_BROKER,
     DEFAULT_TOTAL_TARGET,
 )
-from src.scraper import CollectionConfig, ReportScraper
+from train_data_collector.scraper import CollectionConfig, ReportScraper
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -69,8 +69,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--data-dir",
         type=Path,
-        default=Path(__file__).parent.parent / "data",
-        help="PDF 저장 디렉토리",
+        default=None,
+        help="PDF 저장 디렉토리 (기본값: 프로젝트 루트의 data/)",
     )
 
     parser.add_argument(
@@ -97,7 +97,8 @@ def main() -> int:
         delay_range=(args.delay_min, args.delay_max),
     )
 
-    data_dir = Path(args.data_dir)
+    # Default data directory: current working directory / data
+    data_dir = args.data_dir if args.data_dir else Path.cwd() / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info(f"데이터 저장 경로: {data_dir.absolute()}")

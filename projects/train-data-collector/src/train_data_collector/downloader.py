@@ -9,15 +9,15 @@ from pathlib import Path
 
 import httpx
 
-from src.config import (
+from train_data_collector.config import (
     DEFAULT_DELAY_RANGE,
     DEFAULT_HEADERS,
     MAX_RETRIES,
     REQUEST_TIMEOUT,
     RETRY_BACKOFF,
 )
-from src.metadata import MetadataManager, calculate_file_hash
-from src.parser import ReportInfo
+from train_data_collector.metadata import MetadataManager, calculate_file_hash
+from train_data_collector.parser import ReportInfo
 
 logger = logging.getLogger(__name__)
 

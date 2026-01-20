@@ -8,8 +8,8 @@ import httpx
 import pytest
 import respx
 
-from src.downloader import DownloadError, PDFDownloader
-from src.parser import ReportInfo
+from train_data_collector.downloader import DownloadError, PDFDownloader
+from train_data_collector.parser import ReportInfo
 
 
 # =============================================================================

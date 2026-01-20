@@ -35,7 +35,7 @@ uv sync
 ### 기본 실행 (500개 PDF 수집)
 
 ```bash
-uv run python main.py
+uv run train-data-collector
 ```
 
 ### CLI 옵션
@@ -47,23 +47,23 @@ uv run python main.py
 | `--min-per-broker` | 5 | 증권사별 최소 수집 수 |
 | `--delay-min` | 5.0 | 다운로드 간 최소 대기 시간(초) |
 | `--delay-max` | 10.0 | 다운로드 간 최대 대기 시간(초) |
-| `--data-dir` | ../data | PDF 저장 디렉토리 |
+| `--data-dir` | ./data | PDF 저장 디렉토리 (현재 작업 디렉토리 기준) |
 | `-v, --verbose` | false | 상세 로그 출력 |
 
 ### 사용 예시
 
 ```bash
 # 테스트용 소량 수집
-uv run python main.py --target 20 --min-brokers 3
+uv run train-data-collector --target 20 --min-brokers 3
 
 # 상세 로그와 함께 실행
-uv run python main.py --target 100 -v
+uv run train-data-collector --target 100 -v
 
 # 커스텀 저장 경로
-uv run python main.py --data-dir ./my_data
+uv run train-data-collector --data-dir ./my_data
 
 # 다운로드 간격 조정 (rate limiting)
-uv run python main.py --delay-min 3 --delay-max 7
+uv run train-data-collector --delay-min 3 --delay-max 7
 ```
 
 ## 데이터 구조
@@ -114,6 +114,9 @@ data/
 ## 테스트
 
 ```bash
+# 개발 의존성 설치
+uv sync --extra dev
+
 # 단위 테스트 실행
 uv run pytest tests/ -v --ignore=tests/test_parser_e2e.py
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.parser import (
+from train_data_collector.parser import (
     ReportInfo,
     get_total_pages,
     get_unique_brokers,

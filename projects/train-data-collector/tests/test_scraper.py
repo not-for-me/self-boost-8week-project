@@ -5,9 +5,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.downloader import DownloadResult
-from src.parser import ReportInfo
-from src.scraper import CollectionConfig, CollectionStats, ReportScraper
+from train_data_collector.downloader import DownloadResult
+from train_data_collector.parser import ReportInfo
+from train_data_collector.scraper import CollectionConfig, CollectionStats, ReportScraper
 
 
 # =============================================================================

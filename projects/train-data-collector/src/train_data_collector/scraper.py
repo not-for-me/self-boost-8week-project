@@ -7,7 +7,7 @@ from pathlib import Path
 
 import httpx
 
-from src.config import (
+from train_data_collector.config import (
     BASE_URL,
     DEFAULT_DELAY_RANGE,
     DEFAULT_HEADERS,
@@ -17,9 +17,9 @@ from src.config import (
     REQUEST_TIMEOUT,
 )
 
-from src.downloader import PDFDownloader
-from src.metadata import MetadataManager
-from src.parser import ReportInfo, get_total_pages, parse_report_list
+from train_data_collector.downloader import PDFDownloader
+from train_data_collector.metadata import MetadataManager
+from train_data_collector.parser import ReportInfo, get_total_pages, parse_report_list
 
 logger = logging.getLogger(__name__)
 
