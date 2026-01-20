@@ -5,7 +5,6 @@ Uses img2table and docling detectors to maximize recall.
 """
 
 import os
-import re
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
@@ -38,27 +37,21 @@ def create_detectors() -> list:
     ]
 
 
-def find_pdf_files(path: Path, firm_filter: str | None = None) -> list[Path]:
+def find_pdf_files(path: Path) -> list[Path]:
     """Find PDF files in the given path.
 
     Args:
         path: File or directory path.
-        firm_filter: Optional firm name filter (matches in filename).
 
     Returns:
         List of PDF file paths.
     """
     if path.is_file():
         if path.suffix.lower() == ".pdf":
-            if firm_filter is None or firm_filter in path.name:
-                return [path]
+            return [path]
         return []
 
     pdf_files = list(path.glob("**/*.pdf"))
-    if firm_filter:
-        pattern = re.compile(re.escape(firm_filter), re.IGNORECASE)
-        pdf_files = [f for f in pdf_files if pattern.search(f.name)]
-
     return sorted(pdf_files)
 
 
@@ -476,13 +469,6 @@ def process_parallel(
     help="Directory to save page images. Default: ./images/",
 )
 @click.option(
-    "--firm",
-    "-f",
-    type=str,
-    default=None,
-    help="Filter by firm name (matches filename).",
-)
-@click.option(
     "--dpi",
     type=int,
     default=150,
@@ -516,7 +502,6 @@ def detect(
     input_path: Path,
     output: Path | None,
     images_dir: Path,
-    firm: str | None,
     dpi: int,
     dry_run: bool,
     summary_only: bool,
@@ -525,7 +510,7 @@ def detect(
 ) -> None:
     """Detect financial tables in PDF files.
 
-    Uses img2table (borderless) and docling detectors for maximum recall.
+    Uses docling ML-based detector with OCR support.
 
     INPUT_PATH can be a single PDF file or a directory containing PDF files.
 
@@ -533,14 +518,14 @@ def detect(
 
         fin-stat-detect detect report.pdf
 
-        fin-stat-detect detect ./data/ --firm "한화투자증권"
-
         fin-stat-detect detect ./data/ --dry-run
 
         fin-stat-detect detect report.pdf --summary-only
+
+        fin-stat-detect detect ./data/ --parallel --workers 4
     """
     # Find PDF files
-    pdf_files = find_pdf_files(input_path, firm)
+    pdf_files = find_pdf_files(input_path)
 
     if not pdf_files:
         console.print("[yellow]No PDF files found.[/yellow]")

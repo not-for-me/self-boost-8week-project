@@ -56,10 +56,11 @@ class TestDetectCommand:
         assert "Detect financial tables in PDF files" in result.output
         assert "--output" in result.output
         assert "--images-dir" in result.output
-        assert "--firm" in result.output
         assert "--dpi" in result.output
         assert "--dry-run" in result.output
         assert "--summary-only" in result.output
+        assert "--parallel" in result.output
+        assert "--workers" in result.output
 
     def test_detect_nonexistent_file_fails(self, runner: CliRunner) -> None:
         """존재하지 않는 파일은 오류 발생."""
@@ -103,26 +104,6 @@ class TestDetectCommand:
         assert result.exit_code == 0
         assert "No PDF files found" in result.output
 
-    def test_detect_dry_run_with_firm_filter(
-        self, runner: CliRunner, tmp_path: Path
-    ) -> None:
-        """firm 필터로 특정 증권사 파일만 선택됨."""
-        # Given
-        (tmp_path / "한화투자증권_report.pdf").touch()
-        (tmp_path / "삼성증권_report.pdf").touch()
-        (tmp_path / "other.pdf").touch()
-
-        # When
-        result = runner.invoke(
-            detect, [str(tmp_path), "--dry-run", "--firm", "한화투자증권"]
-        )
-
-        # Then
-        assert result.exit_code == 0
-        assert "한화투자증권" in result.output
-        assert "삼성증권" not in result.output
-
-
 class TestFindPdfFiles:
     """find_pdf_files 함수 테스트."""
 
@@ -156,19 +137,6 @@ class TestFindPdfFiles:
         assert len(result) == 3
         names = {f.name for f in result}
         assert names == {"file1.pdf", "file2.pdf", "file3.pdf"}
-
-    def test_find_pdf_files_with_firm_filter(self, tmp_path: Path) -> None:
-        """firm 필터로 파일을 필터링함."""
-        # Given
-        (tmp_path / "한화투자증권_2024.pdf").touch()
-        (tmp_path / "삼성증권_2024.pdf").touch()
-
-        # When
-        result = find_pdf_files(tmp_path, firm_filter="한화투자증권")
-
-        # Then
-        assert len(result) == 1
-        assert "한화투자증권" in result[0].name
 
     def test_find_pdf_files_returns_sorted(self, tmp_path: Path) -> None:
         """결과가 정렬되어 반환됨."""
