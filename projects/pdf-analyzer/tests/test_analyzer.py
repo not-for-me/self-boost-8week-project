@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from src.analyzer import (
+from pdf_analyzer.analyzer import (
     CharInfo,
     DocumentInfo,
     LineInfo,

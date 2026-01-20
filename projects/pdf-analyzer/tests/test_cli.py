@@ -4,7 +4,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from main import cli
+from pdf_analyzer.cli import cli
 
 
 class TestInfoCommand:

@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from main import cli
-from src.analyzer import PDFAnalyzer, TableInfo
+from pdf_analyzer.cli import cli
+from pdf_analyzer.analyzer import PDFAnalyzer, TableInfo
 
 
 class TestTableExtraction:

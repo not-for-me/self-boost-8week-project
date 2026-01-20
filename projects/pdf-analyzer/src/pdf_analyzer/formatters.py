@@ -4,7 +4,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from src.analyzer import CollectionStats, DocumentInfo, PageAnalysis, TableInfo
+from pdf_analyzer.analyzer import CollectionStats, DocumentInfo, PageAnalysis, TableInfo
 
 
 def format_document_info(doc_info: DocumentInfo, console: Console) -> None:

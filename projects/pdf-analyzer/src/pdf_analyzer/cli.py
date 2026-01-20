@@ -6,15 +6,15 @@ from pathlib import Path
 import click
 from rich.console import Console
 
-from src.analyzer import PDFAnalyzer, analyze_collection
-from src.formatters import (
+from pdf_analyzer.analyzer import PDFAnalyzer, analyze_collection
+from pdf_analyzer.formatters import (
     format_collection_stats,
     format_document_info,
     format_page_analysis,
     format_table_summary,
     format_tables,
 )
-from src.visualizer import create_simple_visual
+from pdf_analyzer.visualizer import create_simple_visual
 
 console = Console()
 
@@ -38,7 +38,7 @@ def info(pdf_file: Path):
     PDF_FILE: Path to the PDF file to analyze.
 
     Example:
-        uv run python main.py info sample.pdf
+        uv run pdf-analyzer info sample.pdf
     """
     try:
         analyzer = PDFAnalyzer(pdf_file)
@@ -78,10 +78,10 @@ def page(pdf_file: Path, page: int, element: str | None, limit: int):
     PDF_FILE: Path to the PDF file to analyze.
 
     Examples:
-        uv run python main.py page sample.pdf
-        uv run python main.py page sample.pdf --page 2
-        uv run python main.py page sample.pdf -p 1 --element chars
-        uv run python main.py page sample.pdf -p 1 -e lines --limit 50
+        uv run pdf-analyzer page sample.pdf
+        uv run pdf-analyzer page sample.pdf --page 2
+        uv run pdf-analyzer page sample.pdf -p 1 --element chars
+        uv run pdf-analyzer page sample.pdf -p 1 -e lines --limit 50
     """
     try:
         analyzer = PDFAnalyzer(pdf_file)
@@ -134,11 +134,11 @@ def tables(
     PDF_FILE: Path to the PDF file to analyze.
 
     Examples:
-        uv run python main.py tables sample.pdf
-        uv run python main.py tables sample.pdf --page 3
-        uv run python main.py tables sample.pdf --summary
-        uv run python main.py tables sample.pdf --no-content
-        uv run python main.py tables sample.pdf --col-width 20
+        uv run pdf-analyzer tables sample.pdf
+        uv run pdf-analyzer tables sample.pdf --page 3
+        uv run pdf-analyzer tables sample.pdf --summary
+        uv run pdf-analyzer tables sample.pdf --no-content
+        uv run pdf-analyzer tables sample.pdf --col-width 20
     """
     try:
         analyzer = PDFAnalyzer(pdf_file)
@@ -199,10 +199,10 @@ def visual(pdf_file: Path, page: int, width: int, height: int, with_tables: bool
     PDF_FILE: Path to the PDF file to visualize.
 
     Examples:
-        uv run python main.py visual sample.pdf
-        uv run python main.py visual sample.pdf --page 2
-        uv run python main.py visual sample.pdf --width 80 --height 40
-        uv run python main.py visual sample.pdf --with-tables
+        uv run pdf-analyzer visual sample.pdf
+        uv run pdf-analyzer visual sample.pdf --page 2
+        uv run pdf-analyzer visual sample.pdf --width 80 --height 40
+        uv run pdf-analyzer visual sample.pdf --with-tables
     """
     try:
         analyzer = PDFAnalyzer(pdf_file)
@@ -244,10 +244,10 @@ def stats(pdf_files: tuple[Path, ...], limit: int | None):
     PDF_FILES: One or more PDF file paths (supports glob patterns in shell).
 
     Examples:
-        uv run python main.py stats *.pdf
-        uv run python main.py stats ../data/**/*.pdf
-        uv run python main.py stats file1.pdf file2.pdf file3.pdf
-        uv run python main.py stats ../data/**/*.pdf --limit 100
+        uv run pdf-analyzer stats *.pdf
+        uv run pdf-analyzer stats ../data/**/*.pdf
+        uv run pdf-analyzer stats file1.pdf file2.pdf file3.pdf
+        uv run pdf-analyzer stats ../data/**/*.pdf --limit 100
     """
     import glob as glob_module
 

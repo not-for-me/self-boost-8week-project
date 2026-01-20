@@ -18,7 +18,7 @@ uv sync
 ### `info` - 문서 정보 확인
 
 ```bash
-uv run python main.py info sample.pdf
+uv run pdf-analyzer info sample.pdf
 ```
 
 출력 예시:
@@ -40,41 +40,41 @@ Page Summary
 
 ```bash
 # 페이지 요약
-uv run python main.py page sample.pdf
+uv run pdf-analyzer page sample.pdf
 
 # 특정 페이지 분석
-uv run python main.py page sample.pdf --page 2
+uv run pdf-analyzer page sample.pdf --page 2
 
 # 문자 정보 상세 보기
-uv run python main.py page sample.pdf -e chars
+uv run pdf-analyzer page sample.pdf -e chars
 
 # 선 객체 분석
-uv run python main.py page sample.pdf -e lines
+uv run pdf-analyzer page sample.pdf -e lines
 
 # 이미지 정보
-uv run python main.py page sample.pdf -e images
+uv run pdf-analyzer page sample.pdf -e images
 
 # 출력 개수 제한
-uv run python main.py page sample.pdf -e chars --limit 50
+uv run pdf-analyzer page sample.pdf -e chars --limit 50
 ```
 
 ### `tables` - 테이블 감지 및 분석
 
 ```bash
 # 전체 문서의 테이블 분석
-uv run python main.py tables sample.pdf
+uv run pdf-analyzer tables sample.pdf
 
 # 특정 페이지의 테이블만 분석
-uv run python main.py tables sample.pdf --page 3
+uv run pdf-analyzer tables sample.pdf --page 3
 
 # 테이블 요약만 보기 (어느 페이지에 몇 개)
-uv run python main.py tables sample.pdf --summary
+uv run pdf-analyzer tables sample.pdf --summary
 
 # 셀 내용 숨기기
-uv run python main.py tables sample.pdf --no-content
+uv run pdf-analyzer tables sample.pdf --no-content
 
 # 열 너비 조정
-uv run python main.py tables sample.pdf --col-width 20
+uv run pdf-analyzer tables sample.pdf --col-width 20
 ```
 
 출력 예시:
@@ -97,16 +97,16 @@ Location: (72.0, 150.0) - (432.0, 250.0) | Size: 360.0 x 100.0 pt
 
 ```bash
 # 페이지 레이아웃 시각화
-uv run python main.py visual sample.pdf
+uv run pdf-analyzer visual sample.pdf
 
 # 특정 페이지 시각화
-uv run python main.py visual sample.pdf --page 2
+uv run pdf-analyzer visual sample.pdf --page 2
 
 # 크기 조정
-uv run python main.py visual sample.pdf --width 80 --height 40
+uv run pdf-analyzer visual sample.pdf --width 80 --height 40
 
 # 테이블 경계 포함
-uv run python main.py visual sample.pdf --with-tables
+uv run pdf-analyzer visual sample.pdf --with-tables
 ```
 
 출력 예시:
@@ -129,13 +129,13 @@ Legend:
 
 ```bash
 # 여러 파일 통계
-uv run python main.py stats *.pdf
+uv run pdf-analyzer stats *.pdf
 
 # 하위 폴더 포함
-uv run python main.py stats ../data/**/*.pdf
+uv run pdf-analyzer stats ../data/**/*.pdf
 
 # 분석 파일 수 제한
-uv run python main.py stats ../data/**/*.pdf --limit 100
+uv run pdf-analyzer stats ../data/**/*.pdf --limit 100
 ```
 
 출력 예시:
@@ -214,6 +214,10 @@ Content Statistics (per page)
 ## 테스트
 
 ```bash
+# 개발 의존성 설치
+uv sync --group dev
+
+# 테스트 실행
 uv run pytest tests/ -v
 ```
 

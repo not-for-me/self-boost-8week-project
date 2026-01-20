@@ -4,9 +4,9 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from main import cli
-from src.analyzer import PDFAnalyzer
-from src.visualizer import ASCIIVisualizer, VisualConfig, create_simple_visual
+from pdf_analyzer.cli import cli
+from pdf_analyzer.analyzer import PDFAnalyzer
+from pdf_analyzer.visualizer import ASCIIVisualizer, VisualConfig, create_simple_visual
 
 
 class TestASCIIVisualizer:

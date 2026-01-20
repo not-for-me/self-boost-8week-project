@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from src.analyzer import PageAnalysis, TableInfo
+from pdf_analyzer.analyzer import PageAnalysis, TableInfo
 
 
 @dataclass
