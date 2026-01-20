@@ -258,21 +258,24 @@ class FinancialTableClassifier:
         page: int,
         bbox: BBox,
     ) -> str:
-        """Extract text from a bounding box region in a PDF.
+        """Extract text from a PDF page.
+
+        Note: pypdf does not support bbox-based text extraction,
+        so this returns full page text. The keyword matching will
+        still work as it searches for patterns in the text.
 
         Args:
             pdf_path: Path to the PDF file.
             page: Page number (1-indexed).
-            bbox: Bounding box coordinates.
+            bbox: Bounding box coordinates (currently unused with pypdf).
 
         Returns:
-            Extracted text content.
+            Extracted text content from the full page.
         """
-        import pdfplumber
+        from pypdf import PdfReader
 
-        with pdfplumber.open(pdf_path) as pdf:
-            page_obj = pdf.pages[page - 1]
-            cropped = page_obj.within_bbox((bbox.x0, bbox.y0, bbox.x1, bbox.y1))
-            text = cropped.extract_text() or ""
+        reader = PdfReader(pdf_path)
+        page_obj = reader.pages[page - 1]
+        text = page_obj.extract_text() or ""
 
         return text

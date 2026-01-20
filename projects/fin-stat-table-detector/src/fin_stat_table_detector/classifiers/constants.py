@@ -14,7 +14,7 @@ FINANCIAL_STATEMENT_PATTERNS: dict[str, dict] = {
             "매출총이익",
             "영업이익",
             "영업외손익",
-            "세전이익",
+            "세전순이익",
             "법인세",
             "당기순이익",
             "지배주주순이익",
@@ -58,12 +58,19 @@ FINANCIAL_STATEMENT_PATTERNS: dict[str, dict] = {
         "keywords": [
             "EPS",
             "BPS",
+            "CFPS",  # Cash Flow Per Share
             "PER",
             "PBR",
+            "PCR",  # Price to Cash Flow Ratio
+            "P/E",  # OCR 변형
+            "P/B",  # OCR 변형
+            "P/CF",  # OCR 변형
             "ROE",
             "ROA",
+            "ROIC",
             "EBITDA",
             "EV/EBITDA",
+            "EV/EBIT",
             "배당수익률",
             "DPS",
         ],

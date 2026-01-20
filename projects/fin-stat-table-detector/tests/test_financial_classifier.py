@@ -359,23 +359,22 @@ class TestExtractTextFromBbox:
     """Text extraction tests using mocks."""
 
     def test_extract_text_from_bbox(self) -> None:
-        """Should extract text from PDF using pdfplumber."""
+        """Should extract text from PDF using pypdf."""
         # Given
         classifier = FinancialTableClassifier()
         bbox = BBox(50, 100, 500, 400)
 
-        # Mock pdfplumber
+        # Mock pypdf
         mock_page = MagicMock()
-        mock_cropped = MagicMock()
-        mock_cropped.extract_text.return_value = "매출액 1,234"
-        mock_page.within_bbox.return_value = mock_cropped
+        mock_page.extract_text.return_value = "매출액 1,234"
 
-        mock_pdf = MagicMock()
-        mock_pdf.pages = [mock_page]
-        mock_pdf.__enter__ = MagicMock(return_value=mock_pdf)
-        mock_pdf.__exit__ = MagicMock(return_value=False)
+        mock_reader = MagicMock()
+        mock_reader.pages = [mock_page]
 
-        with patch("pdfplumber.open", return_value=mock_pdf):
+        with patch(
+            "pypdf.PdfReader",
+            return_value=mock_reader,
+        ):
             # When
             result = classifier._extract_text_from_bbox(
                 "/path/to/test.pdf",
@@ -385,4 +384,4 @@ class TestExtractTextFromBbox:
 
         # Then
         assert result == "매출액 1,234"
-        mock_page.within_bbox.assert_called_once_with((50, 100, 500, 400))
+        mock_page.extract_text.assert_called_once()

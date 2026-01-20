@@ -18,14 +18,20 @@ class DoclingDetector(AbstractDetector):
 
     Attributes:
         _converter: DocumentConverter 인스턴스 (lazy loading)
+        force_ocr: 전체 페이지 OCR 강제 적용 여부 (이미지 기반 PDF용)
     """
 
-    def __init__(self):
+    def __init__(self, force_ocr: bool = True):
         """DoclingDetector 초기화.
+
+        Args:
+            force_ocr: 전체 페이지 OCR 강제 적용 여부 (기본값: True).
+                      이미지 기반 PDF나 스캔된 문서에서 텍스트 추출에 필요.
 
         _converter는 lazy loading으로 첫 detect() 호출 시 초기화됩니다.
         """
         self._converter = None  # lazy loading
+        self._force_ocr = force_ocr
 
     @property
     def name(self) -> str:
@@ -47,9 +53,21 @@ class DoclingDetector(AbstractDetector):
         """
         if self._converter is None:
             try:
-                from docling.document_converter import DocumentConverter
+                from docling.document_converter import DocumentConverter, PdfFormatOption
+                from docling.datamodel.pipeline_options import (
+                    OcrAutoOptions,
+                    PdfPipelineOptions,
+                )
 
-                self._converter = DocumentConverter()
+                pipeline_options = PdfPipelineOptions(
+                    do_ocr=True,
+                    ocr_options=OcrAutoOptions(force_full_page_ocr=self._force_ocr),
+                )
+                self._converter = DocumentConverter(
+                    format_options={
+                        "pdf": PdfFormatOption(pipeline_options=pipeline_options),
+                    }
+                )
             except ImportError:
                 raise ImportError(
                     "docling이 설치되지 않았습니다. "
@@ -76,10 +94,11 @@ class DoclingDetector(AbstractDetector):
         """
         converter = self._get_converter()
         result = converter.convert(pdf_path)
+        doc = result.document
 
         candidates = []
 
-        for table in result.document.tables:
+        for table in doc.tables:
             # bbox와 페이지 정보 추출
             if not table.prov:
                 continue
@@ -92,17 +111,20 @@ class DoclingDetector(AbstractDetector):
                 continue
 
             # bbox 추출 (docling은 (l, t, r, b) 형식)
+            # 좌표계에 따라 t > b인 경우가 있으므로 정규화 필요
             bbox_data = prov.bbox
-            bbox = BBox(
-                x0=bbox_data.l,
-                y0=bbox_data.t,
-                x1=bbox_data.r,
-                y1=bbox_data.b,
-            )
+            x0, x1 = min(bbox_data.l, bbox_data.r), max(bbox_data.l, bbox_data.r)
+            y0, y1 = min(bbox_data.t, bbox_data.b), max(bbox_data.t, bbox_data.b)
+
+            # 유효하지 않은 bbox 건너뛰기
+            if x0 >= x1 or y0 >= y1:
+                continue
+
+            bbox = BBox(x0=x0, y0=y0, x1=x1, y1=y1)
 
             # DataFrame으로 텍스트 추출
             try:
-                df = table.export_to_dataframe()
+                df = table.export_to_dataframe(doc=doc)
                 text_content = df.to_string()
                 row_count = len(df)
                 col_count = len(df.columns)
