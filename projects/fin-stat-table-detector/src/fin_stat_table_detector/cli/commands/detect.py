@@ -1,56 +1,41 @@
 """Detect command for financial statement table detection.
 
 Processes PDF files and exports detection results to Label Studio format.
+Uses img2table and docling detectors to maximize recall.
 """
 
+import os
 import re
+import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import click
-import pdfplumber
-from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from pypdf import PdfReader
+from rich.console import Console, Group
+from rich.live import Live
+from rich.spinner import Spinner
 from rich.table import Table
+from rich.text import Text
 
-from fin_stat_table_detector.detectors import CamelotDetector, PdfplumberDetector
+from fin_stat_table_detector.detectors import DoclingDetector
 from fin_stat_table_detector.ensemble import EnsembleDetector
 from fin_stat_table_detector.exporters import LabelStudioExporter, PageDimensions
 
 console = Console()
 
-# Mapping of detector names to classes
-DETECTOR_MAP = {
-    "pdfplumber": PdfplumberDetector,
-    "camelot_lattice": lambda: CamelotDetector(flavor="lattice"),
-    "camelot_stream": lambda: CamelotDetector(flavor="stream"),
-}
 
+def create_detectors() -> list:
+    """Create detector instances.
 
-def get_detectors(detector_names: list[str]) -> list:
-    """Create detector instances from names.
-
-    Args:
-        detector_names: List of detector names.
+    Docling: ML 기반 테이블 감지 (borderless 표 포함)
 
     Returns:
         List of detector instances.
-
-    Raises:
-        click.BadParameter: If an unknown detector name is provided.
     """
-    detectors = []
-    for name in detector_names:
-        name = name.strip()
-        if name not in DETECTOR_MAP:
-            raise click.BadParameter(
-                f"Unknown detector: {name}. Available: {', '.join(DETECTOR_MAP.keys())}"
-            )
-        factory = DETECTOR_MAP[name]
-        if callable(factory) and not isinstance(factory, type):
-            detectors.append(factory())
-        else:
-            detectors.append(factory())
-    return detectors
+    return [
+        DoclingDetector(),
+    ]
 
 
 def find_pdf_files(path: Path, firm_filter: str | None = None) -> list[Path]:
@@ -75,6 +60,23 @@ def find_pdf_files(path: Path, firm_filter: str | None = None) -> list[Path]:
         pdf_files = [f for f in pdf_files if pattern.search(f.name)]
 
     return sorted(pdf_files)
+
+
+def get_pdf_page_info(pdf_path: Path) -> list[tuple[float, float]]:
+    """Get page dimensions from PDF using pypdf.
+
+    Args:
+        pdf_path: Path to PDF file.
+
+    Returns:
+        List of (width, height) tuples for each page.
+    """
+    reader = PdfReader(pdf_path)
+    page_dims = []
+    for page in reader.pages:
+        media_box = page.mediabox
+        page_dims.append((float(media_box.width), float(media_box.height)))
+    return page_dims
 
 
 def convert_pdf_to_images(
@@ -102,11 +104,8 @@ def convert_pdf_to_images(
     images_dir.mkdir(parents=True, exist_ok=True)
     pdf_stem = pdf_path.stem
 
-    # Get PDF page dimensions using pdfplumber
-    page_dims_list = []
-    with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            page_dims_list.append((page.width, page.height))
+    # Get PDF page dimensions using pypdf
+    page_dims_list = get_pdf_page_info(pdf_path)
 
     # Convert PDF to images
     images = convert_from_path(pdf_path, dpi=dpi)
@@ -128,6 +127,68 @@ def convert_pdf_to_images(
         results.append((i, image_path, dims))
 
     return results
+
+
+def process_pdf_worker(
+    pdf_path_str: str,
+    images_dir_str: str,
+    dpi: int,
+    summary_only: bool,
+) -> dict:
+    """Worker function for parallel PDF processing.
+
+    This is a standalone function that can be pickled for multiprocessing.
+    It creates its own detector instance.
+
+    Args:
+        pdf_path_str: Path to the PDF file (as string for pickling).
+        images_dir_str: Directory to save images (as string for pickling).
+        dpi: Image resolution.
+        summary_only: If True, don't generate images.
+
+    Returns:
+        Dictionary with processing statistics.
+    """
+    pdf_path = Path(pdf_path_str)
+    images_dir = Path(images_dir_str)
+
+    # Create detector in worker process
+    detector_instances = create_detectors()
+    ensemble = EnsembleDetector(detector_instances)
+
+    stats = {
+        "pdf_path": str(pdf_path),
+        "pages": 0,
+        "tables_detected": 0,
+        "categories": {},
+        "tables": [],  # Store table data for later export
+    }
+
+    try:
+        # Detect financial tables
+        tables = ensemble.detect_financial_tables(str(pdf_path))
+        stats["tables_detected"] = len(tables)
+        stats["tables"] = tables
+
+        # Count by category
+        for table in tables:
+            cat = table.category
+            stats["categories"][cat] = stats["categories"].get(cat, 0) + 1
+
+        if summary_only:
+            reader = PdfReader(pdf_path)
+            stats["pages"] = len(reader.pages)
+        else:
+            page_results = convert_pdf_to_images(pdf_path, images_dir, dpi)
+            stats["pages"] = len(page_results)
+            stats["page_results"] = [
+                (pn, str(ip), dims) for pn, ip, dims in page_results
+            ]
+
+    except Exception as e:
+        stats["error"] = str(e)
+
+    return stats
 
 
 def process_pdf(
@@ -169,8 +230,8 @@ def process_pdf(
 
     if summary_only:
         # Just count pages without image conversion
-        with pdfplumber.open(pdf_path) as pdf:
-            stats["pages"] = len(pdf.pages)
+        reader = PdfReader(pdf_path)
+        stats["pages"] = len(reader.pages)
         return stats
 
     # Convert PDF to images and add to exporter
@@ -188,6 +249,212 @@ def process_pdf(
         exporter.add_page_results(str(image_path), page_tables, dims)
 
     return stats
+
+
+def process_sequential(
+    pdf_files: list[Path],
+    images_dir: Path,
+    dpi: int,
+    summary_only: bool,
+    exporter: LabelStudioExporter,
+) -> list[dict]:
+    """Process PDF files sequentially with spinner progress.
+
+    Args:
+        pdf_files: List of PDF file paths.
+        images_dir: Directory to save images.
+        dpi: Image resolution.
+        summary_only: If True, don't generate images.
+        exporter: LabelStudioExporter instance.
+
+    Returns:
+        List of statistics dictionaries.
+    """
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+
+    detector_instances = create_detectors()
+    ensemble = EnsembleDetector(detector_instances)
+
+    console.print(
+        f"[dim]Using detectors: {', '.join(d.name for d in detector_instances)}[/dim]\n"
+    )
+
+    all_stats = []
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Processing PDFs...", total=len(pdf_files))
+
+        for pdf_path in pdf_files:
+            progress.update(task, description=f"Processing {pdf_path.name}...")
+            try:
+                stats = process_pdf(
+                    pdf_path,
+                    ensemble,
+                    exporter,
+                    images_dir,
+                    dpi,
+                    summary_only,
+                )
+                all_stats.append(stats)
+            except Exception as e:
+                console.print(f"[red]Error processing {pdf_path}: {e}[/red]")
+                all_stats.append(
+                    {
+                        "pdf_path": str(pdf_path),
+                        "error": str(e),
+                    }
+                )
+            progress.advance(task)
+
+    return all_stats
+
+
+def build_progress_display(
+    pdf_files: list[Path],
+    completed: dict[str, dict],
+    in_progress: set[str],
+    num_workers: int,
+) -> Group:
+    """Build the progress display for parallel processing.
+
+    Args:
+        pdf_files: List of all PDF files.
+        completed: Dict mapping pdf_path to stats for completed files.
+        in_progress: Set of pdf_paths currently being processed.
+        num_workers: Number of worker processes.
+
+    Returns:
+        Rich Group with progress display.
+    """
+    lines = []
+
+    # Header
+    done_count = len(completed)
+    total_count = len(pdf_files)
+    header = Text(f"Processing {total_count} files with {num_workers} workers...")
+    header.stylize("bold")
+    lines.append(header)
+    lines.append(Text(""))
+
+    for pdf_path in pdf_files:
+        path_str = str(pdf_path)
+        name = pdf_path.name
+
+        if path_str in completed:
+            # Completed
+            stats = completed[path_str]
+            if "error" in stats:
+                line = Text()
+                line.append("✗ ", style="red")
+                line.append(name, style="red")
+                line.append(f" (Error: {stats['error'][:30]}...)", style="dim red")
+            else:
+                pages = stats.get("pages", 0)
+                tables = stats.get("tables_detected", 0)
+                line = Text()
+                line.append("✓ ", style="green")
+                line.append(name, style="green")
+                line.append(f" ({pages} pages, {tables} tables)", style="dim")
+            lines.append(line)
+        elif path_str in in_progress:
+            # In progress
+            line = Text()
+            line.append("◐ ", style="yellow")
+            line.append(name, style="yellow")
+            lines.append(line)
+        else:
+            # Pending
+            line = Text()
+            line.append("  ", style="dim")
+            line.append(name, style="dim")
+            lines.append(line)
+
+    # Progress summary
+    lines.append(Text(""))
+    progress_text = Text(f"[{done_count}/{total_count}]", style="bold cyan")
+    lines.append(progress_text)
+
+    return Group(*lines)
+
+
+def process_parallel(
+    pdf_files: list[Path],
+    images_dir: Path,
+    dpi: int,
+    summary_only: bool,
+    workers: int | None,
+) -> list[dict]:
+    """Process PDF files in parallel with live progress display.
+
+    Args:
+        pdf_files: List of PDF file paths.
+        images_dir: Directory to save images.
+        dpi: Image resolution.
+        summary_only: If True, don't generate images.
+        workers: Number of worker processes.
+
+    Returns:
+        List of statistics dictionaries.
+    """
+    num_workers = workers or os.cpu_count() or 4
+
+    console.print(f"[dim]Using detectors: docling[/dim]")
+    console.print(f"[dim]Workers: {num_workers}[/dim]\n")
+
+    completed: dict[str, dict] = {}
+    in_progress: set[str] = set()
+    all_stats: list[dict] = []
+
+    # Map future to pdf_path
+    future_to_path: dict = {}
+
+    with Live(
+        build_progress_display(pdf_files, completed, in_progress, num_workers),
+        console=console,
+        refresh_per_second=4,
+    ) as live:
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            # Submit all tasks
+            for pdf_path in pdf_files:
+                future = executor.submit(
+                    process_pdf_worker,
+                    str(pdf_path),
+                    str(images_dir),
+                    dpi,
+                    summary_only,
+                )
+                future_to_path[future] = pdf_path
+                in_progress.add(str(pdf_path))
+                live.update(
+                    build_progress_display(
+                        pdf_files, completed, in_progress, num_workers
+                    )
+                )
+
+            # Process completed tasks
+            for future in as_completed(future_to_path):
+                pdf_path = future_to_path[future]
+                path_str = str(pdf_path)
+
+                try:
+                    stats = future.result()
+                except Exception as e:
+                    stats = {"pdf_path": path_str, "error": str(e)}
+
+                in_progress.discard(path_str)
+                completed[path_str] = stats
+                all_stats.append(stats)
+
+                live.update(
+                    build_progress_display(
+                        pdf_files, completed, in_progress, num_workers
+                    )
+                )
+
+    return all_stats
 
 
 @click.command()
@@ -216,13 +483,6 @@ def process_pdf(
     help="Filter by firm name (matches filename).",
 )
 @click.option(
-    "--detectors",
-    "-d",
-    type=str,
-    default="pdfplumber,camelot_lattice",
-    help="Comma-separated detector names. Default: pdfplumber,camelot_lattice",
-)
-@click.option(
     "--dpi",
     type=int,
     default=150,
@@ -239,17 +499,33 @@ def process_pdf(
     is_flag=True,
     help="Show detection summary without generating images.",
 )
+@click.option(
+    "--parallel",
+    "-p",
+    is_flag=True,
+    help="Enable parallel processing for multiple files.",
+)
+@click.option(
+    "--workers",
+    "-w",
+    type=int,
+    default=None,
+    help="Number of worker processes. Default: CPU count.",
+)
 def detect(
     input_path: Path,
     output: Path | None,
     images_dir: Path,
     firm: str | None,
-    detectors: str,
     dpi: int,
     dry_run: bool,
     summary_only: bool,
+    parallel: bool,
+    workers: int | None,
 ) -> None:
     """Detect financial tables in PDF files.
+
+    Uses img2table (borderless) and docling detectors for maximum recall.
 
     INPUT_PATH can be a single PDF file or a directory containing PDF files.
 
@@ -286,60 +562,55 @@ def detect(
         else:
             output = input_path / "labels.json"
 
-    # Create detectors
-    detector_names = [d.strip() for d in detectors.split(",")]
-    detector_instances = get_detectors(detector_names)
-    ensemble = EnsembleDetector(detector_instances)
-
     # Create exporter
     exporter = LabelStudioExporter()
 
     # Process files
-    all_stats = []
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Processing PDFs...", total=len(pdf_files))
+    start_time = time.perf_counter()
 
-        for pdf_path in pdf_files:
-            progress.update(task, description=f"Processing {pdf_path.name}...")
-            try:
-                stats = process_pdf(
-                    pdf_path,
-                    ensemble,
-                    exporter,
-                    images_dir,
-                    dpi,
-                    summary_only,
-                )
-                all_stats.append(stats)
-            except Exception as e:
-                console.print(f"[red]Error processing {pdf_path}: {e}[/red]")
-                all_stats.append(
-                    {
-                        "pdf_path": str(pdf_path),
-                        "error": str(e),
-                    }
-                )
-            progress.advance(task)
+    if parallel and len(pdf_files) > 1:
+        # Parallel processing
+        all_stats = process_parallel(
+            pdf_files, images_dir, dpi, summary_only, workers
+        )
+    else:
+        # Sequential processing
+        all_stats = process_sequential(
+            pdf_files, images_dir, dpi, summary_only, exporter
+        )
+
+    elapsed_time = time.perf_counter() - start_time
 
     # Save results (unless summary-only)
     if not summary_only:
+        # For parallel processing, need to populate exporter from stats
+        if parallel and len(pdf_files) > 1:
+            for stats in all_stats:
+                if "error" in stats or "page_results" not in stats:
+                    continue
+                tables = stats.get("tables", [])
+                tables_by_page: dict[int, list] = {}
+                for table in tables:
+                    tables_by_page.setdefault(table.page, []).append(table)
+
+                for page_num, image_path_str, dims in stats["page_results"]:
+                    page_tables = tables_by_page.get(page_num, [])
+                    exporter.add_page_results(image_path_str, page_tables, dims)
+
         exporter.save(output)
         console.print(f"\n[green]Results saved to: {output}[/green]")
         console.print(f"[green]Images saved to: {images_dir}[/green]")
 
     # Print summary
-    print_summary(all_stats)
+    print_summary(all_stats, elapsed_time)
 
 
-def print_summary(all_stats: list[dict]) -> None:
+def print_summary(all_stats: list[dict], elapsed_time: float) -> None:
     """Print processing summary.
 
     Args:
         all_stats: List of statistics dictionaries.
+        elapsed_time: Total elapsed time in seconds.
     """
     table = Table(title="\nDetection Summary")
     table.add_column("PDF", style="cyan")
@@ -386,3 +657,4 @@ def print_summary(all_stats: list[dict]) -> None:
     )
 
     console.print(table)
+    console.print(f"\n[dim]Elapsed time: {elapsed_time:.2f}s[/dim]")

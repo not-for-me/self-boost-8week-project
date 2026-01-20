@@ -7,9 +7,9 @@ import pytest
 from click.testing import CliRunner
 
 from fin_stat_table_detector.cli.commands.detect import (
+    create_detectors,
     detect,
     find_pdf_files,
-    get_detectors,
 )
 from fin_stat_table_detector.cli.main import main
 
@@ -57,7 +57,6 @@ class TestDetectCommand:
         assert "--output" in result.output
         assert "--images-dir" in result.output
         assert "--firm" in result.output
-        assert "--detectors" in result.output
         assert "--dpi" in result.output
         assert "--dry-run" in result.output
         assert "--summary-only" in result.output
@@ -199,52 +198,17 @@ class TestFindPdfFiles:
         assert result == []
 
 
-class TestGetDetectors:
-    """get_detectors 함수 테스트."""
+class TestCreateDetectors:
+    """create_detectors 함수 테스트."""
 
-    def test_get_pdfplumber_detector(self) -> None:
-        """pdfplumber detector를 생성함."""
+    def test_creates_docling_detector(self) -> None:
+        """docling detector를 생성함."""
         # When
-        detectors = get_detectors(["pdfplumber"])
+        detectors = create_detectors()
 
         # Then
         assert len(detectors) == 1
-        assert detectors[0].name == "pdfplumber"
-
-    def test_get_camelot_lattice_detector(self) -> None:
-        """camelot_lattice detector를 생성함."""
-        # When
-        detectors = get_detectors(["camelot_lattice"])
-
-        # Then
-        assert len(detectors) == 1
-        assert detectors[0].name == "camelot_lattice"
-
-    def test_get_multiple_detectors(self) -> None:
-        """여러 detector를 생성함."""
-        # When
-        detectors = get_detectors(["pdfplumber", "camelot_lattice"])
-
-        # Then
-        assert len(detectors) == 2
-        names = {d.name for d in detectors}
-        assert names == {"pdfplumber", "camelot_lattice"}
-
-    def test_unknown_detector_raises_error(self) -> None:
-        """알 수 없는 detector 이름은 오류 발생."""
-        # When / Then
-        with pytest.raises(Exception) as exc_info:
-            get_detectors(["unknown_detector"])
-
-        assert "Unknown detector" in str(exc_info.value)
-
-    def test_strips_whitespace_from_names(self) -> None:
-        """detector 이름의 공백을 제거함."""
-        # When
-        detectors = get_detectors(["  pdfplumber  ", " camelot_lattice "])
-
-        # Then
-        assert len(detectors) == 2
+        assert detectors[0].name == "docling"
 
 
 class TestDetectCommandIntegration:
