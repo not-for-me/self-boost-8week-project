@@ -288,21 +288,135 @@ new_y1 = page_height - old_y0
 
 ---
 
-## 5. 탐지기 비교 테이블
+## 5. DoclingDetector
 
-| 특성 | PdfplumberDetector | CamelotDetector (lattice) | CamelotDetector (stream) |
-|------|-------------------|---------------------------|--------------------------|
-| 선 있는 표 | ✅ 정확 | ✅ 정확 | ⚠️ 가능하나 정확도 낮음 |
-| 선 없는 표 | ❌ 불가 | ❌ 불가 | ✅ 가능 |
-| False Positive | 낮음 | 낮음 | 높음 |
-| 속도 | 빠름 | 느림 | 느림 |
-| 의존성 | pdfplumber | ghostscript 필요 | ghostscript 필요 |
+### 5.1 개요
+
+[Docling](https://docling-project.github.io/docling/)은 IBM Research에서 개발한 AI 기반 문서 파싱 도구입니다.
+
+**강점**: ML 레이아웃 모델로 선 없는 표도 정확하게 탐지
+**약점**: 무거움 (첫 실행 시 모델 다운로드), 느림
+
+### 5.2 구현 스펙
+
+```python
+from typing import Optional
+from fin_stat_table_detector.detectors.base import AbstractDetector
+from fin_stat_table_detector.models import TableCandidate, BBox
+
+class DoclingDetector(AbstractDetector):
+    """Docling(IBM) ML 기반 테이블 탐지기"""
+
+    def __init__(self):
+        self._converter = None  # lazy loading
+
+    @property
+    def name(self) -> str:
+        return "docling"
+
+    def _get_converter(self):
+        """Lazy loading - 첫 사용 시에만 모델 로드"""
+        if self._converter is None:
+            try:
+                from docling.document_converter import DocumentConverter
+                self._converter = DocumentConverter()
+            except ImportError:
+                raise ImportError(
+                    "docling이 설치되지 않았습니다. "
+                    "`uv sync --extra ml` 또는 `pip install docling`으로 설치하세요."
+                )
+        return self._converter
+
+    def detect(
+        self,
+        pdf_path: str,
+        pages: Optional[list[int]] = None
+    ) -> list[TableCandidate]:
+        """
+        Docling으로 테이블 탐지
+
+        Note: Docling은 전체 문서를 처리하므로 pages 필터는 후처리로 적용
+        """
+        converter = self._get_converter()
+        result = converter.convert(pdf_path)
+
+        candidates = []
+
+        for table in result.document.tables:
+            # bbox와 페이지 정보 추출
+            if not table.prov:
+                continue
+
+            prov = table.prov[0]
+            page_no = prov.page_no  # 1-indexed
+
+            # pages 필터 적용
+            if pages is not None and page_no not in pages:
+                continue
+
+            # bbox 추출 (docling은 (l, t, r, b) 형식)
+            bbox_data = prov.bbox
+            bbox = BBox(
+                x0=bbox_data.l,
+                y0=bbox_data.t,
+                x1=bbox_data.r,
+                y1=bbox_data.b
+            )
+
+            # DataFrame으로 텍스트 추출
+            try:
+                df = table.export_to_dataframe()
+                text_content = df.to_string()
+                row_count = len(df)
+                col_count = len(df.columns)
+            except Exception:
+                text_content = None
+                row_count = None
+                col_count = None
+
+            candidates.append(TableCandidate(
+                page=page_no,
+                bbox=bbox,
+                detector=self.name,
+                row_count=row_count,
+                col_count=col_count,
+                text_content=text_content
+            ))
+
+        return candidates
+```
+
+### 5.3 Lazy Loading 설계
+
+Docling 모델은 무거우므로 lazy loading 패턴을 사용합니다:
+- `__init__`에서 모델을 로드하지 않음
+- 첫 `detect()` 호출 시에만 모델 로드
+- optional dependency이므로 import 실패 시 명확한 에러 메시지 제공
+
+### 5.4 Docling bbox 형식
+
+Docling은 `(l, t, r, b)` (left, top, right, bottom) 형식을 사용:
+- 좌상단 기준 좌표계 (변환 불필요)
+- 단위: 포인트(pt)
 
 ---
 
-## 6. 테스트 케이스
+## 6. 탐지기 비교 테이블
 
-### 6.1 AbstractDetector 테스트
+| 특성 | PdfplumberDetector | CamelotDetector (lattice) | CamelotDetector (stream) | DoclingDetector |
+|------|-------------------|---------------------------|--------------------------|-----------------|
+| 선 있는 표 | ✅ 정확 | ✅ 정확 | ⚠️ 가능하나 정확도 낮음 | ✅ 정확 |
+| 선 없는 표 | ❌ 불가 | ❌ 불가 | ✅ 가능 | ✅ 매우 정확 |
+| False Positive | 낮음 | 낮음 | 높음 | 낮음 |
+| 속도 | 빠름 | 느림 | 느림 | 매우 느림 |
+| 의존성 | pdfplumber | ghostscript 필요 | ghostscript 필요 | docling (optional) |
+| 첫 실행 | 즉시 | 즉시 | 즉시 | 모델 다운로드 (~2.5분) |
+
+---
+
+## 7. 테스트 케이스
+
+### 7.1 AbstractDetector 테스트
 
 ```python
 class TestAbstractDetector:
@@ -328,7 +442,7 @@ class TestAbstractDetector:
         assert callable(detector.detect)
 ```
 
-### 6.2 PdfplumberDetector 테스트
+### 7.2 PdfplumberDetector 테스트
 
 ```python
 class TestPdfplumberDetector:
@@ -367,7 +481,7 @@ class TestPdfplumberDetector:
             assert candidate.detector == "pdfplumber"
 ```
 
-### 6.3 CamelotDetector 테스트
+### 7.3 CamelotDetector 테스트
 
 ```python
 class TestCamelotDetector:
@@ -406,12 +520,77 @@ class TestCamelotDetector:
         # 실제 테스트는 mock 또는 fixture 필요
 ```
 
+### 7.4 DoclingDetector 테스트
+
+```python
+class TestDoclingDetector:
+    """DoclingDetector 테스트"""
+
+    def test_name_is_docling(self):
+        """name이 'docling'임"""
+        # Given
+        detector = DoclingDetector()
+
+        # Then
+        assert detector.name == "docling"
+
+    def test_lazy_loading_converter_is_none_initially(self):
+        """초기화 시 converter가 None임 (lazy loading)"""
+        # Given
+        detector = DoclingDetector()
+
+        # Then
+        assert detector._converter is None
+
+    def test_import_error_when_docling_not_installed(self):
+        """docling 미설치 시 명확한 에러 메시지"""
+        # Given
+        detector = DoclingDetector()
+
+        # When / Then
+        # docling이 설치되지 않은 환경에서 테스트
+        # mock을 사용하여 ImportError 시뮬레이션
+        with pytest.raises(ImportError) as exc_info:
+            # docling import를 실패하도록 mock
+            detector._get_converter()
+
+        assert "uv sync --extra ml" in str(exc_info.value)
+
+    def test_detect_returns_table_candidates(self):
+        """detect는 TableCandidate 객체를 반환"""
+        # Given
+        detector = DoclingDetector()
+
+        # When
+        result = detector.detect("sample_with_tables.pdf")
+
+        # Then
+        for candidate in result:
+            assert isinstance(candidate, TableCandidate)
+            assert candidate.detector == "docling"
+
+    def test_pages_filter_applied(self):
+        """pages 파라미터로 특정 페이지만 필터링"""
+        # Given
+        detector = DoclingDetector()
+
+        # When
+        result = detector.detect("multi_page.pdf", pages=[1, 3])
+
+        # Then
+        for candidate in result:
+            assert candidate.page in [1, 3]
+```
+
 ---
 
-## 7. 구현 파일
+## 8. 구현 파일
 
 - **위치**: `src/fin_stat_table_detector/detectors/`
   - `base.py`: AbstractDetector
   - `pdfplumber_det.py`: PdfplumberDetector
   - `camelot_det.py`: CamelotDetector
-- **의존성**: pdfplumber, camelot-py, ghostscript
+  - `docling_det.py`: DoclingDetector
+- **의존성**:
+  - 필수: pdfplumber, camelot-py, ghostscript
+  - Optional (ML): docling (`uv sync --extra ml`)
