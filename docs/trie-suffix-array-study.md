@@ -492,18 +492,57 @@ def get_pair_frequencies_naive(corpus: list[list[str]]) -> Counter:
 
 def get_pair_frequencies_suffix_array(text: str) -> Counter:
     """
-    Suffix Array 방식: 인접 bigram 빈도를 효율적으로 계산
-    대규모 코퍼스에서 더 효율적
+    Suffix Array + LCP를 활용한 bigram 빈도 계산
+
+    원리:
+    - SA가 정렬되어 있으므로 같은 bigram으로 시작하는 suffix들이 연속
+    - LCP[i] >= 2이면 SA[i-1]과 SA[i] 위치의 bigram이 동일
+    - 연속 구간의 길이 = 해당 bigram의 출현 횟수
+
+    주의: 단순 bigram 카운팅에는 naive O(n)이 더 효율적!
+    SA+LCP는 "임의 길이 패턴"이나 "반복 패턴 탐지"에 강점이 있음
     """
-    # 간단화를 위해 bigram만 추출
     sa = build_suffix_array_naive(text)
     lcp = build_lcp_array(text, sa)
-    
+
+    pairs = Counter()
+    n = len(text)
+    i = 0
+
+    while i < n:
+        # bigram 추출 가능한 위치인지 확인
+        if sa[i] + 1 >= n:
+            i += 1
+            continue
+
+        bigram = text[sa[i]:sa[i] + 2]
+        if ' ' in bigram:
+            i += 1
+            continue
+
+        # 같은 bigram prefix를 공유하는 연속 구간 카운트
+        count = 1
+        j = i + 1
+        while j < n and lcp[j] >= 2:
+            if sa[j] + 1 < n and text[sa[j]:sa[j] + 2] == bigram:
+                count += 1
+            j += 1
+
+        pairs[(bigram[0], bigram[1])] = count
+        i = j  # 다음 그룹으로 건너뛰기
+
+    return pairs
+
+
+def get_pair_frequencies_naive_simple(text: str) -> Counter:
+    """
+    Naive 방식: 텍스트를 한 번 순회하며 모든 bigram 카운트
+    O(n) - 단순 bigram 카운팅에는 이게 최선!
+    """
     pairs = Counter()
     for i in range(len(text) - 1):
-        if text[i] != ' ' and text[i + 1] != ' ':  # 단어 경계 제외
+        if text[i] != ' ' and text[i + 1] != ' ':
             pairs[(text[i], text[i + 1])] += 1
-    
     return pairs
 
 
