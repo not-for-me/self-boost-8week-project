@@ -2,7 +2,7 @@
 Suffix Array 구현
 BPE 학습의 핵심 자료구조
 
-실행: python suffix_array_implementation.py
+실행: python suffix_array.py
 """
 
 from __future__ import annotations
@@ -12,11 +12,11 @@ from collections import Counter
 def build_suffix_array_naive(text: str) -> list[int]:
     """
     Suffix Array를 단순 정렬로 구축.
-    
+
     시간복잡도: O(n² log n)
     - n개의 suffix 생성: O(n²) 공간
     - 정렬: O(n log n) 비교, 각 비교 O(n)
-    
+
     교육용 구현. 실제로는 O(n) 알고리즘 사용 (SA-IS, DC3 등)
     """
     n = len(text)
@@ -32,9 +32,9 @@ def build_lcp_array(text: str, suffix_array: list[int]) -> list[int]:
     """
     LCP (Longest Common Prefix) Array 구축.
     lcp[i] = suffix_array[i]와 suffix_array[i-1]의 공통 prefix 길이
-    
+
     Kasai's Algorithm: O(n)
-    
+
     핵심 아이디어:
     - rank[i]: suffix i의 SA에서의 위치
     - 만약 lcp[rank[i]] = k 이면, lcp[rank[i+1]] >= k-1
@@ -43,29 +43,29 @@ def build_lcp_array(text: str, suffix_array: list[int]) -> list[int]:
     n = len(text)
     rank = [0] * n  # rank[i] = suffix i의 suffix array에서의 위치
     lcp = [0] * n
-    
+
     # rank 배열 구축
     for i, suffix_idx in enumerate(suffix_array):
         rank[suffix_idx] = i
-    
+
     k = 0  # 현재 LCP 길이
     for i in range(n):
         if rank[i] == 0:
             k = 0
             continue
-        
+
         j = suffix_array[rank[i] - 1]  # SA에서 바로 앞 suffix의 시작 인덱스
-        
+
         # 공통 prefix 계산
         while i + k < n and j + k < n and text[i + k] == text[j + k]:
             k += 1
-        
+
         lcp[rank[i]] = k
-        
+
         # 다음 반복을 위해 k 감소 (최대 1만큼)
         if k > 0:
             k -= 1
-    
+
     return lcp
 
 
@@ -119,16 +119,16 @@ def find_most_frequent_bigram(text: str) -> tuple[str, int] | None:
     """
     if len(text) < 2:
         return None
-    
+
     bigrams = Counter()
     for i in range(len(text) - 1):
         bigram = text[i:i + 2]
         if ' ' not in bigram:  # 공백 제외
             bigrams[bigram] += 1
-    
+
     if not bigrams:
         return None
-    
+
     return bigrams.most_common(1)[0]
 
 
@@ -139,22 +139,27 @@ def longest_repeated_substring(text: str) -> str:
     """
     if len(text) < 2:
         return ""
-    
+
     sa = build_suffix_array_naive(text)
     lcp = build_lcp_array(text, sa)
-    
+
     max_lcp = 0
     max_idx = 0
-    
+
     for i in range(1, len(lcp)):
         if lcp[i] > max_lcp:
             max_lcp = lcp[i]
             max_idx = i
-    
+
     if max_lcp == 0:
         return ""
-    
+
     return text[sa[max_idx]:sa[max_idx] + max_lcp]
+
+
+# ============================================================
+# 데모 및 테스트
+# ============================================================
 
 
 def demo_suffix_array_basics():
@@ -162,31 +167,31 @@ def demo_suffix_array_basics():
     print("=" * 60)
     print("Suffix Array 기본 개념")
     print("=" * 60)
-    
+
     text = "banana$"
-    
+
     print(f"\nText: '{text}'")
     print(f"Length: {len(text)}")
-    
+
     # 모든 suffix 보여주기
     print("\n--- 모든 Suffix (정렬 전) ---")
     for i in range(len(text)):
         print(f"  {i}: {text[i:]}")
-    
+
     # Suffix Array 구축
     sa = build_suffix_array_naive(text)
     print(f"\n--- Suffix Array ---")
     print(f"SA = {sa}")
-    
+
     print("\n--- 정렬된 Suffix ---")
     for i, idx in enumerate(sa):
         print(f"  SA[{i}] = {idx}: '{text[idx:]}'")
-    
+
     # LCP Array
     lcp = build_lcp_array(text, sa)
     print(f"\n--- LCP Array ---")
     print(f"LCP = {lcp}")
-    
+
     print("\n--- LCP 의미 ---")
     for i in range(1, len(sa)):
         common = text[sa[i]:sa[i] + lcp[i]] if lcp[i] > 0 else "(없음)"
@@ -199,17 +204,17 @@ def demo_repeated_substrings():
     print("\n" + "=" * 60)
     print("반복 Substring 탐지 (BPE 기초)")
     print("=" * 60)
-    
+
     text = "abracadabra"
     print(f"\nText: '{text}'")
-    
+
     # 반복 substring 찾기
     repeated = find_repeated_substrings(text, min_length=2)
 
     print("\n--- 반복되는 Substring (길이 >= 2) ---")
     for substr, count in list(repeated.items())[:10]:
         print(f"  '{substr}': {count}회 등장")
-    
+
     # 가장 긴 반복 substring
     lrs = longest_repeated_substring(text)
     print(f"\n--- 가장 긴 반복 Substring ---")
@@ -290,15 +295,15 @@ class SimpleBPETrainer:
     단순화된 BPE 학습기
     Suffix Array를 활용한 빈번한 쌍 탐지
     """
-    
+
     def __init__(self):
         self.merges: list[tuple[str, str]] = []
         self.vocab: set[str] = set()
-    
+
     def train(self, corpus: list[str], num_merges: int = 10) -> None:
         """
         BPE 학습
-        
+
         1. 단어를 문자 시퀀스로 변환 (</w>로 단어 끝 표시)
         2. 가장 빈번한 쌍을 찾아 병합
         3. num_merges 횟수만큼 반복
@@ -306,21 +311,21 @@ class SimpleBPETrainer:
         # 단어 → 문자 리스트 변환
         words: list[list[str]] = []
         word_freq: dict[tuple[str, ...], int] = {}
-        
+
         for text in corpus:
             for word in text.split():
                 word_tuple = tuple(list(word) + ['</w>'])
                 word_freq[word_tuple] = word_freq.get(word_tuple, 0) + 1
-        
+
         # 초기 vocabulary
         self.vocab = set()
         for word_tuple in word_freq:
             for char in word_tuple:
                 self.vocab.add(char)
-        
+
         print(f"초기 vocabulary 크기: {len(self.vocab)}")
         print(f"고유 단어 수: {len(word_freq)}")
-        
+
         for i in range(num_merges):
             # 모든 인접 쌍의 빈도 계산
             pairs = Counter()
@@ -328,41 +333,41 @@ class SimpleBPETrainer:
                 for j in range(len(word_tuple) - 1):
                     pair = (word_tuple[j], word_tuple[j + 1])
                     pairs[pair] += freq
-            
+
             if not pairs:
                 break
-            
+
             # 가장 빈번한 쌍
             best_pair = pairs.most_common(1)[0]
             pair, count = best_pair
-            
+
             if count < 2:
                 break
-            
+
             print(f"Merge {i + 1}: {pair[0]} + {pair[1]} → "
                   f"{pair[0] + pair[1]} (빈도: {count})")
-            
+
             # 병합 기록
             self.merges.append(pair)
             new_token = pair[0] + pair[1]
             self.vocab.add(new_token)
-            
+
             # 모든 단어에 병합 적용
             new_word_freq = {}
             for word_tuple, freq in word_freq.items():
                 new_word = self._apply_merge(list(word_tuple), pair)
                 new_word_freq[tuple(new_word)] = freq
             word_freq = new_word_freq
-        
+
         print(f"\n최종 vocabulary 크기: {len(self.vocab)}")
-    
+
     def _apply_merge(self, word: list[str], pair: tuple[str, str]) -> list[str]:
         """단어에 병합 규칙 적용"""
         new_word = []
         i = 0
         while i < len(word):
-            if (i < len(word) - 1 and 
-                word[i] == pair[0] and 
+            if (i < len(word) - 1 and
+                word[i] == pair[0] and
                 word[i + 1] == pair[1]):
                 new_word.append(pair[0] + pair[1])
                 i += 2
@@ -370,14 +375,14 @@ class SimpleBPETrainer:
                 new_word.append(word[i])
                 i += 1
         return new_word
-    
+
     def tokenize(self, word: str) -> list[str]:
         """학습된 BPE로 단어 토크나이징"""
         tokens = list(word) + ['</w>']
-        
+
         for pair in self.merges:
             tokens = self._apply_merge(tokens, pair)
-        
+
         return tokens
 
 
@@ -386,23 +391,23 @@ def demo_bpe_trainer():
     print("\n" + "=" * 60)
     print("BPE Trainer 실전 데모")
     print("=" * 60)
-    
+
     corpus = [
         "low lower lowest",
-        "new newer newest", 
+        "new newer newest",
         "show showed showing",
         "low low low",
         "new new",
     ]
-    
+
     print("\n학습 코퍼스:")
     for text in corpus:
         print(f"  '{text}'")
-    
+
     print("\n--- BPE 학습 ---")
     trainer = SimpleBPETrainer()
     trainer.train(corpus, num_merges=15)
-    
+
     print("\n--- 토크나이징 테스트 ---")
     test_words = ["lower", "newer", "lowest", "newest", "showed", "unknown"]
     for word in test_words:
