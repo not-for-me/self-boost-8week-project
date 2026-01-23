@@ -103,16 +103,42 @@ class LabelStudioExporter:
 
     Attributes:
         model_version: Version identifier for detection results.
+        dataset_name: Name of the dataset for Label Studio local file paths.
     """
 
-    def __init__(self, model_version: str = "ensemble-v1") -> None:
+    def __init__(
+        self,
+        model_version: str = "ensemble-v1",
+        dataset_name: str | None = None,
+    ) -> None:
         """Initialize the exporter.
 
         Args:
             model_version: Version identifier for detection model.
+            dataset_name: Dataset name for Label Studio local file paths.
+                If provided, image paths will be formatted as:
+                /data/local-files/?d=<dataset_name>/<filename>
         """
         self.model_version = model_version
+        self.dataset_name = dataset_name
         self._tasks: list[LabelStudioTask] = []
+
+    def _format_image_path(self, image_path: str) -> str:
+        """Format image path for Label Studio.
+
+        Args:
+            image_path: Original image file path.
+
+        Returns:
+            Formatted path for Label Studio. If dataset_name is set,
+            returns /data/local-files/?d=<dataset_name>/<filename>.
+            Otherwise returns the original path.
+        """
+        if self.dataset_name is None:
+            return image_path
+
+        filename = Path(image_path).name
+        return f"/data/local-files/?d={self.dataset_name}/{filename}"
 
     def add_page_results(
         self,
@@ -139,8 +165,9 @@ class LabelStudioExporter:
             )
             annotations.append(annotation)
 
+        formatted_path = self._format_image_path(image_path)
         task = LabelStudioTask(
-            image_path=image_path,
+            image_path=formatted_path,
             annotations=annotations,
             model_version=self.model_version,
         )

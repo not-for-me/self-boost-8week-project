@@ -498,6 +498,14 @@ def process_parallel(
     default=None,
     help="Number of worker processes. Default: CPU count.",
 )
+@click.option(
+    "--dataset-name",
+    "-d",
+    type=str,
+    default=None,
+    help="Dataset name for Label Studio local file paths. "
+    "Images will be referenced as /data/local-files/?d=<dataset-name>/<filename>",
+)
 def detect(
     input_path: Path,
     output: Path | None,
@@ -507,6 +515,7 @@ def detect(
     summary_only: bool,
     parallel: bool,
     workers: int | None,
+    dataset_name: str | None,
 ) -> None:
     """Detect financial tables in PDF files.
 
@@ -516,13 +525,15 @@ def detect(
 
     Examples:
 
-        fin-stat-detect detect report.pdf
+        fin-stat-table-detector detect report.pdf
 
-        fin-stat-detect detect ./data/ --dry-run
+        fin-stat-table-detector detect ./data/ --dry-run
 
-        fin-stat-detect detect report.pdf --summary-only
+        fin-stat-table-detector detect report.pdf --summary-only
 
-        fin-stat-detect detect ./data/ --parallel --workers 4
+        fin-stat-table-detector detect ./data/ --parallel --workers 4
+
+        fin-stat-table-detector detect report.pdf -d samsung_2024
     """
     # Find PDF files
     pdf_files = find_pdf_files(input_path)
@@ -548,7 +559,7 @@ def detect(
             output = input_path / "labels.json"
 
     # Create exporter
-    exporter = LabelStudioExporter()
+    exporter = LabelStudioExporter(dataset_name=dataset_name)
 
     # Process files
     start_time = time.perf_counter()
