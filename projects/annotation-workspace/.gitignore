@@ -8,4 +8,4 @@ data/local-files/
 !data/.gitkeep
 !data/local-files/.gitkeep
 
-.json
+*.json
