@@ -16,10 +16,10 @@ echo "Starting Label Studio..."
 docker compose up -d
 
 echo ""
-echo "Label Studio is starting at http://localhost:8080"
+echo "Label Studio is starting at http://localhost:8081"
 echo ""
 echo "First-time setup:"
-echo "  1. Open http://localhost:8080 in your browser"
+echo "  1. Open http://localhost:8081 in your browser"
 echo "  2. Create an account (this is local, use any email)"
 echo "  3. Create a new project"
 echo "  4. In Settings > Labeling Interface, paste contents of:"
