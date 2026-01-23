@@ -1,0 +1,11 @@
+<View>
+  <Image name="image" value="$image"/>
+  <RectangleLabels name="label" toName="image">
+    <Label value="income_statement" background="#FF6B6B"/>
+    <Label value="balance_sheet" background="#4ECDC4"/>
+    <Label value="cash_flow" background="#45B7D1"/>
+    <Label value="valuation" background="#96CEB4"/>
+    <Label value="performance" background="#FFEAA7"/>
+    <Label value="other_table" background="#DFE6E9"/>
+  </RectangleLabels>
+</View>
