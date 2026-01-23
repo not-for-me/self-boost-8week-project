@@ -12,9 +12,9 @@
 | [Suffix Array](./suffix_array/) | 효율적인 substring 빈도 계산 | ✅ | [README](./suffix_array/README.md) |
 | [Bloom Filter](./bloom_filter/) | 메모리 효율적 중복 체크 | ✅ | [README](./bloom_filter/README.md) |
 | [MinHash](./minhash/) | 문서 유사도 및 near-duplicate 탐지 | ✅ | [README](./minhash/README.md) |
+| [Union-Find](./union_find/) | 대규모 클러스터 병합 | ✅ | [README](./union_find/README.md) |
 | Heap / Priority Queue | Top-K 샘플링, Beam Search | ⬜ | - |
 | Inverted Index | RAG의 sparse retrieval (BM25) | ⬜ | - |
-| Union-Find | 대규모 클러스터 병합 | ⬜ | - |
 | LSH | Locality-Sensitive Hashing | ⬜ | - |
 
 ---
@@ -112,6 +112,9 @@ dsa/
 ├── trie/                  # Trie 구현 및 학습 노트
 │   ├── README.md
 │   └── trie.py
+├── union_find/            # Union-Find 구현 및 학습 노트
+│   ├── README.md
+│   └── union_find.py
 └── [future topics]/       # 추가 예정
 ```
 
