@@ -1,0 +1,9 @@
+# Label Studio data (generated)
+data/label-studio/
+
+# Local files (images, PDFs)
+data/local-files/
+
+# Keep directory structure
+!data/.gitkeep
+!data/local-files/.gitkeep

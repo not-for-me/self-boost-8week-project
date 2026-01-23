@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  label-studio:
+    image: heartexlabs/label-studio:latest
+    container_name: label-studio
+    ports:
+      - "8080:8080"
+    environment:
+      - LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true
+      - LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=/label-studio/data/local-files
+    volumes:
+      # Label Studio 데이터 (프로젝트, 어노테이션 등)
+      - ./data/label-studio:/label-studio/data
+      # 로컬 파일 (이미지, PDF 등)
+      - ./data/local-files:/label-studio/data/local-files
+    restart: unless-stopped
