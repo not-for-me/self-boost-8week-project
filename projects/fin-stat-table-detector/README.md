@@ -41,14 +41,14 @@ uv sync
 
 ```bash
 # 도움말 보기
-fin-stat-detect --help
-fin-stat-detect detect --help
+fin-stat-table-detector --help
+fin-stat-table-detector detect --help
 ```
 
 ### 단일 PDF 처리
 
 ```bash
-fin-stat-detect detect report.pdf
+fin-stat-table-detector detect report.pdf
 ```
 
 결과:
@@ -58,7 +58,7 @@ fin-stat-detect detect report.pdf
 ### 디렉토리 배치 처리
 
 ```bash
-fin-stat-detect detect ./data/
+fin-stat-table-detector detect ./data/
 ```
 
 `./data/` 디렉토리 내 모든 PDF 파일을 재귀적으로 처리합니다.
@@ -69,10 +69,10 @@ fin-stat-detect detect ./data/
 
 ```bash
 # 병렬 처리 활성화 (기본 워커 수: CPU 코어 수)
-fin-stat-detect detect ./data/ --parallel
+fin-stat-table-detector detect ./data/ --parallel
 
 # 워커 수 지정
-fin-stat-detect detect ./data/ --parallel --workers 4
+fin-stat-table-detector detect ./data/ --parallel --workers 4
 ```
 
 출력 형식 (패키지 인스톨러 스타일):
@@ -106,7 +106,7 @@ Elapsed time: 123.45s
 실제 처리 없이 대상 파일 목록만 확인:
 
 ```bash
-fin-stat-detect detect ./data/ --dry-run
+fin-stat-table-detector detect ./data/ --dry-run
 ```
 
 ### 요약만 출력 (이미지 생성 없음)
@@ -114,7 +114,7 @@ fin-stat-detect detect ./data/ --dry-run
 이미지를 생성하지 않고 탐지 결과 요약만 출력:
 
 ```bash
-fin-stat-detect detect report.pdf --summary-only
+fin-stat-table-detector detect report.pdf --summary-only
 ```
 
 ### 전체 옵션
@@ -128,22 +128,44 @@ fin-stat-detect detect report.pdf --summary-only
 | `--summary-only` | `-s` | 요약만 출력 (이미지 생성 안 함) | `False` |
 | `--parallel` | `-p` | 병렬 처리 활성화 | `False` |
 | `--workers` | `-w` | 워커 프로세스 수 | CPU 코어 수 |
+| `--dataset-name` | `-d` | Label Studio 로컬 파일 경로용 데이터셋 이름 | `None` |
 
 ### 사용 예시
 
 ```bash
 # 기본 사용
-fin-stat-detect detect report.pdf
+fin-stat-table-detector detect report.pdf
 
 # 출력 경로 지정
-fin-stat-detect detect report.pdf -o output/labels.json -i output/images/
+fin-stat-table-detector detect report.pdf -o output/labels.json -i output/images/
 
 # 고해상도 이미지 생성
-fin-stat-detect detect report.pdf --dpi 300
+fin-stat-table-detector detect report.pdf --dpi 300
 
 # 병렬 처리 + 요약만 출력
-fin-stat-detect detect ./data/ --parallel --workers 4 --summary-only
+fin-stat-table-detector detect ./data/ --parallel --workers 4 --summary-only
+
+# Label Studio 연동 (dataset-name 지정)
+fin-stat-table-detector detect ./data/SK증권/ \
+    -o ./sk_broker_labels.json \
+    -i ./sk_broker/ \
+    -d sk_broker \
+    -p -w 4
 ```
+
+### Label Studio 연동
+
+`--dataset-name` 옵션을 사용하면 이미지 경로가 Label Studio Local Files 형식으로 생성됩니다:
+
+```json
+{
+  "data": {
+    "image": "/data/local-files/?d=sk_broker/report_page_001.jpg"
+  }
+}
+```
+
+이 형식은 Label Studio의 Cloud Storage > Local Files 설정과 함께 사용됩니다.
 
 ## 출력 형식
 

@@ -30,21 +30,36 @@ cd projects/annotation-workspace
 ### 3. 데이터 준비
 
 ```bash
-# 이미지 복사
-cp /path/to/pdf-images/*.png data/local-files/images/
+# fin-stat-table-detector로 PDF 처리 (dataset-name 필수)
+cd ../fin-stat-table-detector
+uv run fin-stat-table-detector detect ../data/SK증권/ \
+    -o ./sk_broker_labels.json \
+    -i ./sk_broker/ \
+    -d sk_broker \
+    -p -w 4
 
-# fin-stat-table-detector의 predictions JSON 준비
-# (Label Studio UI에서 import)
+# 생성된 이미지를 annotation-workspace로 이동
+mv ./sk_broker/* ../annotation-workspace/data/local-files/
 ```
+
+### 3.5. Cloud Storage 설정 (최초 1회)
+
+1. Label Studio > Settings > Cloud Storage
+2. **Add Source Storage** 클릭
+3. Storage Type: **Local files**
+4. Absolute local path: `/label-studio/data/local-files`
+5. **Add Storage** 클릭
+6. **Sync Storage** 클릭하여 파일 목록 동기화
 
 ### 4. 검수 작업
 
-1. Label Studio에서 predictions JSON import
-2. 각 이미지의 bbox 검토:
+1. Label Studio에서 **Import** 클릭
+2. `sk_broker_labels.json` 파일 업로드
+3. 각 이미지의 bbox 검토:
    - 잘못된 bbox 삭제
    - 누락된 bbox 추가
    - 카테고리 수정
-3. Export > JSON으로 annotations 내보내기
+4. **Export** > JSON으로 annotations 내보내기
 
 ### 5. 평가
 
