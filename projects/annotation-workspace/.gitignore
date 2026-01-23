@@ -7,3 +7,5 @@ data/local-files/
 # Keep directory structure
 !data/.gitkeep
 !data/local-files/.gitkeep
+
+.json
