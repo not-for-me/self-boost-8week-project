@@ -332,3 +332,42 @@ class TestLabelStudioExporter:
         assert len(result) == 5
         for i, task in enumerate(result):
             assert task["data"]["image"] == f"/images/page_{i:03d}.jpg"
+
+    def test_dataset_name_formats_image_path(self) -> None:
+        """dataset_name 설정 시 이미지 경로가 Label Studio 형식으로 변환됨."""
+        # Given
+        exporter = LabelStudioExporter(dataset_name="samsung_2024")
+        dims = PageDimensions(612.0, 792.0, 1224, 1584)
+
+        # When
+        exporter.add_page_results("/some/local/path/page_001.jpg", [], dims)
+        result = exporter.to_list()
+
+        # Then
+        assert result[0]["data"]["image"] == "/data/local-files/?d=samsung_2024/page_001.jpg"
+
+    def test_dataset_name_none_preserves_original_path(self) -> None:
+        """dataset_name이 None이면 원본 경로 유지."""
+        # Given
+        exporter = LabelStudioExporter(dataset_name=None)
+        dims = PageDimensions(612.0, 792.0, 1224, 1584)
+
+        # When
+        exporter.add_page_results("/original/path/image.jpg", [], dims)
+        result = exporter.to_list()
+
+        # Then
+        assert result[0]["data"]["image"] == "/original/path/image.jpg"
+
+    def test_dataset_name_extracts_filename_only(self) -> None:
+        """dataset_name 사용 시 파일명만 추출하여 경로 생성."""
+        # Given
+        exporter = LabelStudioExporter(dataset_name="test_dataset")
+        dims = PageDimensions(612.0, 792.0, 1224, 1584)
+
+        # When
+        exporter.add_page_results("/very/deep/nested/path/report_page_005.jpg", [], dims)
+        result = exporter.to_list()
+
+        # Then
+        assert result[0]["data"]["image"] == "/data/local-files/?d=test_dataset/report_page_005.jpg"
