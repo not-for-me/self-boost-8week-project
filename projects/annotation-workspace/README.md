@@ -19,7 +19,7 @@ cd projects/annotation-workspace
 ./scripts/start.sh
 ```
 
-브라우저에서 http://localhost:8080 접속
+브라우저에서 http://localhost:8081 접속
 
 ### 2. 초기 설정 (최초 1회)
 
