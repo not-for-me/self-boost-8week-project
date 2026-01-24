@@ -10,7 +10,7 @@ import sys
 import pytest
 
 from fin_stat_table_detector.detectors.base import AbstractDetector
-from fin_stat_table_detector.detectors.docling_det import DoclingDetector
+from fin_stat_table_detector.detectors.docling import DoclingDetector
 from fin_stat_table_detector.models import TableCandidate
 
 
@@ -470,7 +470,7 @@ class TestDoclingDetectorGetConverter:
             {"docling": MagicMock(), "docling.document_converter": MagicMock()},
         ):
             with patch(
-                "fin_stat_table_detector.detectors.docling_det.DoclingDetector._get_converter"
+                "fin_stat_table_detector.detectors.docling.DoclingDetector._get_converter"
             ) as mock_get:
                 # Simulate successful import and creation
                 mock_get.return_value = mock_converter_instance

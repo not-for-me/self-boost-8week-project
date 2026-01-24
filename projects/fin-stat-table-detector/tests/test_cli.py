@@ -6,11 +6,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from fin_stat_table_detector.cli.commands.detect import (
-    create_detectors,
-    detect,
-    find_pdf_files,
-)
+from fin_stat_table_detector.cli.commands.detect import detect
+from fin_stat_table_detector.detectors.factory import create_detectors
+from fin_stat_table_detector.utils.file_utils import find_pdf_files
 from fin_stat_table_detector.cli.main import main
 
 
