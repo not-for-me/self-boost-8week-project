@@ -26,6 +26,10 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "unit: Unit tests (isolated, fast)",
+    "integration: Integration tests (multi-module, slower)",
+]
 
 [build-system]
 requires = ["hatchling"]
