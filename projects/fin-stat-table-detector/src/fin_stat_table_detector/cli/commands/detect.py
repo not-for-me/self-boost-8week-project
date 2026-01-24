@@ -12,7 +12,11 @@ from rich.console import Console
 
 from fin_stat_table_detector.cli.display import print_summary
 from fin_stat_table_detector.exporters import LabelStudioExporter
-from fin_stat_table_detector.processing import process_parallel, process_sequential
+from fin_stat_table_detector.processing import (
+    ParallelBatchProcessor,
+    ProcessingConfig,
+    SequentialBatchProcessor,
+)
 from fin_stat_table_detector.utils.file_utils import find_pdf_files
 
 console = Console()
@@ -126,41 +130,39 @@ def detect(
         else:
             output = input_path / "labels.json"
 
-    # Create exporter
+    # Create configuration and exporter
+    config = ProcessingConfig(
+        images_dir=images_dir,
+        dpi=dpi,
+        summary_only=summary_only,
+    )
     exporter = LabelStudioExporter(dataset_name=dataset_name)
+
+    # Select and create processor
+    if parallel and len(pdf_files) > 1:
+        processor = ParallelBatchProcessor(
+            config=config,
+            exporter=exporter,
+            console=console,
+            workers=workers,
+        )
+    else:
+        processor = SequentialBatchProcessor(
+            config=config,
+            exporter=exporter,
+            console=console,
+        )
 
     # Process files
     start_time = time.perf_counter()
-
-    if parallel and len(pdf_files) > 1:
-        # Parallel processing
-        all_stats = process_parallel(
-            pdf_files, images_dir, dpi, summary_only, workers, console
-        )
-    else:
-        # Sequential processing
-        all_stats = process_sequential(
-            pdf_files, images_dir, dpi, summary_only, exporter, console
-        )
-
+    results = processor.process(pdf_files)
     elapsed_time = time.perf_counter() - start_time
+
+    # Convert results to dict format for backward compatibility
+    all_stats = [result.to_dict() for result in results]
 
     # Save results (unless summary-only)
     if not summary_only:
-        # For parallel processing, need to populate exporter from stats
-        if parallel and len(pdf_files) > 1:
-            for stats in all_stats:
-                if "error" in stats or "page_results" not in stats:
-                    continue
-                tables = stats.get("tables", [])
-                tables_by_page: dict[int, list] = {}
-                for table in tables:
-                    tables_by_page.setdefault(table.page, []).append(table)
-
-                for page_num, image_path_str, dims in stats["page_results"]:
-                    page_tables = tables_by_page.get(page_num, [])
-                    exporter.add_page_results(image_path_str, page_tables, dims)
-
         exporter.save(output)
         console.print(f"\n[green]Results saved to: {output}[/green]")
         console.print(f"[green]Images saved to: {images_dir}[/green]")

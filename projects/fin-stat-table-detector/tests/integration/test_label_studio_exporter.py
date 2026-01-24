@@ -12,6 +12,10 @@ from fin_stat_table_detector.exporters.label_studio import (
     LabelStudioTask,
 )
 from fin_stat_table_detector.models import BBox, FinancialTable
+from fin_stat_table_detector.processing.config import (
+    PageResult,
+    ProcessingResult,
+)
 
 
 class TestLabelStudioAnnotation:
@@ -371,3 +375,149 @@ class TestLabelStudioExporter:
 
         # Then
         assert result[0]["data"]["image"] == "/data/local-files/?d=test_dataset/report_page_005.jpg"
+
+
+class TestLabelStudioExporterExport:
+    """LabelStudioExporter.export() 메서드 테스트."""
+
+    def test_export_adds_tasks_from_processing_result(self, tmp_path: Path) -> None:
+        """export가 ProcessingResult에서 태스크를 추가함."""
+        # Given
+        exporter = LabelStudioExporter()
+        dims = PageDimensions(612.0, 792.0, 1224, 1584)
+        table = FinancialTable(
+            page=1,
+            bbox=BBox(x0=100, y0=100, x1=500, y1=600),
+            category="income_statement",
+            confidence=0.9,
+            matched_keywords=["매출액"],
+            detector_source="pdfplumber",
+        )
+        page_result = PageResult(
+            page_num=1,
+            image_path=tmp_path / "page_001.jpg",
+            dimensions=dims,
+        )
+        result = ProcessingResult(
+            pdf_path=tmp_path / "test.pdf",
+            pages=1,
+            tables=[table],
+            page_results=[page_result],
+        )
+
+        # When
+        exporter.export(result)
+
+        # Then
+        assert exporter.task_count == 1
+        tasks = exporter.to_list()
+        assert len(tasks) == 1
+        assert "predictions" in tasks[0]
+
+    def test_export_skips_failed_results(self, tmp_path: Path) -> None:
+        """export가 실패한 결과는 건너뜀."""
+        # Given
+        exporter = LabelStudioExporter()
+        result = ProcessingResult(
+            pdf_path=tmp_path / "test.pdf",
+            error="Some error occurred",
+        )
+
+        # When
+        exporter.export(result)
+
+        # Then
+        assert exporter.task_count == 0
+
+    def test_export_skips_results_without_page_results(self, tmp_path: Path) -> None:
+        """export가 page_results가 없는 결과는 건너뜀."""
+        # Given
+        exporter = LabelStudioExporter()
+        result = ProcessingResult(
+            pdf_path=tmp_path / "test.pdf",
+            pages=1,
+            tables=[],
+            page_results=[],  # Empty page results
+        )
+
+        # When
+        exporter.export(result)
+
+        # Then
+        assert exporter.task_count == 0
+
+    def test_export_groups_tables_by_page(self, tmp_path: Path) -> None:
+        """export가 테이블을 페이지별로 그룹화함."""
+        # Given
+        exporter = LabelStudioExporter()
+        dims = PageDimensions(612.0, 792.0, 1224, 1584)
+        table1 = FinancialTable(
+            page=1,
+            bbox=BBox(x0=100, y0=100, x1=500, y1=300),
+            category="income_statement",
+            confidence=0.9,
+            matched_keywords=["매출액"],
+            detector_source="pdfplumber",
+        )
+        table2 = FinancialTable(
+            page=2,
+            bbox=BBox(x0=100, y0=100, x1=500, y1=300),
+            category="balance_sheet",
+            confidence=0.85,
+            matched_keywords=["자산"],
+            detector_source="pdfplumber",
+        )
+        page1 = PageResult(page_num=1, image_path=tmp_path / "page_001.jpg", dimensions=dims)
+        page2 = PageResult(page_num=2, image_path=tmp_path / "page_002.jpg", dimensions=dims)
+        result = ProcessingResult(
+            pdf_path=tmp_path / "test.pdf",
+            pages=2,
+            tables=[table1, table2],
+            page_results=[page1, page2],
+        )
+
+        # When
+        exporter.export(result)
+
+        # Then
+        assert exporter.task_count == 2
+        tasks = exporter.to_list()
+        # Page 1 should have table1
+        assert len(tasks[0]["predictions"][0]["result"]) == 1
+        assert tasks[0]["predictions"][0]["result"][0]["value"]["rectanglelabels"] == ["income_statement"]
+        # Page 2 should have table2
+        assert len(tasks[1]["predictions"][0]["result"]) == 1
+        assert tasks[1]["predictions"][0]["result"][0]["value"]["rectanglelabels"] == ["balance_sheet"]
+
+    def test_export_handles_page_without_tables(self, tmp_path: Path) -> None:
+        """export가 테이블이 없는 페이지도 처리함."""
+        # Given
+        exporter = LabelStudioExporter()
+        dims = PageDimensions(612.0, 792.0, 1224, 1584)
+        table = FinancialTable(
+            page=1,
+            bbox=BBox(x0=100, y0=100, x1=500, y1=300),
+            category="income_statement",
+            confidence=0.9,
+            matched_keywords=["매출액"],
+            detector_source="pdfplumber",
+        )
+        page1 = PageResult(page_num=1, image_path=tmp_path / "page_001.jpg", dimensions=dims)
+        page2 = PageResult(page_num=2, image_path=tmp_path / "page_002.jpg", dimensions=dims)
+        result = ProcessingResult(
+            pdf_path=tmp_path / "test.pdf",
+            pages=2,
+            tables=[table],  # Only on page 1
+            page_results=[page1, page2],
+        )
+
+        # When
+        exporter.export(result)
+
+        # Then
+        assert exporter.task_count == 2
+        tasks = exporter.to_list()
+        # Page 1 has predictions
+        assert "predictions" in tasks[0]
+        # Page 2 has no predictions
+        assert "predictions" not in tasks[1]

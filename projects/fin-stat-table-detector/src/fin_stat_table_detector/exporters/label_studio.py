@@ -4,16 +4,23 @@ Provides classes and functions to export detected financial tables to
 Label Studio compatible JSON format for annotation review.
 """
 
+from __future__ import annotations
+
 import json
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from fin_stat_table_detector.exporters.base import ResultExporter
 from fin_stat_table_detector.exporters.converters import (
     PageDimensions,
     bbox_to_label_studio,
 )
 from fin_stat_table_detector.models import FinancialTable
+
+if TYPE_CHECKING:
+    from fin_stat_table_detector.processing.config import ProcessingResult
 
 
 @dataclass
@@ -95,11 +102,13 @@ class LabelStudioTask:
         return task
 
 
-class LabelStudioExporter:
+class LabelStudioExporter(ResultExporter):
     """Export financial table detection results to Label Studio format.
 
     This exporter creates JSON files compatible with Label Studio's import
     format, including image paths and pre-annotation bounding boxes.
+
+    Implements the ResultExporter interface for use with BatchProcessor.
 
     Attributes:
         model_version: Version identifier for detection results.
@@ -201,3 +210,29 @@ class LabelStudioExporter:
     def task_count(self) -> int:
         """Number of tasks in the exporter."""
         return len(self._tasks)
+
+    def export(self, result: ProcessingResult) -> None:
+        """Export a single processing result.
+
+        Converts ProcessingResult to Label Studio format and adds to tasks.
+        Skips if result has errors or no page results.
+
+        Args:
+            result: ProcessingResult containing detected tables and page info.
+        """
+        if not result.is_success or not result.page_results:
+            return
+
+        # Group tables by page
+        tables_by_page: dict[int, list[FinancialTable]] = {}
+        for table in result.tables:
+            tables_by_page.setdefault(table.page, []).append(table)
+
+        # Add each page to tasks
+        for page_result in result.page_results:
+            page_tables = tables_by_page.get(page_result.page_num, [])
+            self.add_page_results(
+                str(page_result.image_path),
+                page_tables,
+                page_result.dimensions,
+            )

@@ -1,15 +1,35 @@
-"""PDF processing modules for table detection."""
+"""PDF processing modules for table detection.
 
-from fin_stat_table_detector.processing.processor import (
-    process_parallel,
-    process_pdf,
-    process_pdf_worker,
-    process_sequential,
+This package provides classes for processing PDF files to detect financial tables.
+
+Classes:
+    ProcessingConfig: Configuration for PDF processing.
+    ProcessingResult: Result of processing a single PDF file.
+    PageResult: Result of processing a single PDF page.
+    PdfProcessor: Processes a single PDF file.
+    BatchProcessor: Abstract base class for batch processing.
+    SequentialBatchProcessor: Processes files sequentially.
+    ParallelBatchProcessor: Processes files in parallel.
+"""
+
+from fin_stat_table_detector.processing.batch import (
+    BatchProcessor,
+    ParallelBatchProcessor,
+    SequentialBatchProcessor,
 )
+from fin_stat_table_detector.processing.config import (
+    PageResult,
+    ProcessingConfig,
+    ProcessingResult,
+)
+from fin_stat_table_detector.processing.pdf_processor import PdfProcessor
 
 __all__ = [
-    "process_pdf",
-    "process_pdf_worker",
-    "process_sequential",
-    "process_parallel",
+    "ProcessingConfig",
+    "ProcessingResult",
+    "PageResult",
+    "PdfProcessor",
+    "BatchProcessor",
+    "SequentialBatchProcessor",
+    "ParallelBatchProcessor",
 ]
