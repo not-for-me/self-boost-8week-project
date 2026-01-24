@@ -1,11 +1,14 @@
 """PDF downloader for Naver Finance research reports."""
 
+from __future__ import annotations
+
 import logging
 import random
 import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 
@@ -16,8 +19,11 @@ from train_data_collector.config import (
     REQUEST_TIMEOUT,
     RETRY_BACKOFF,
 )
-from train_data_collector.metadata import MetadataManager, calculate_file_hash
+from train_data_collector.metadata import calculate_file_hash
 from train_data_collector.parser import ReportInfo
+
+if TYPE_CHECKING:
+    from train_data_collector.interfaces import IMetadataManager
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +59,7 @@ class PDFDownloader:
         self,
         base_dir: Path,
         delay_range: tuple[float, float] = DEFAULT_DELAY_RANGE,
-        metadata_manager: MetadataManager | None = None,
+        metadata_manager: IMetadataManager | None = None,
     ):
         """Initialize the downloader.
 
@@ -61,6 +67,7 @@ class PDFDownloader:
             base_dir: Base directory for saving PDFs (e.g., ../data).
             delay_range: Min and max seconds to wait between downloads.
             metadata_manager: Optional metadata manager for deduplication.
+                Accepts any implementation of IMetadataManager protocol.
         """
         self.base_dir = Path(base_dir)
         self.delay_range = delay_range

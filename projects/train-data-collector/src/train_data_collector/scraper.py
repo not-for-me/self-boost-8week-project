@@ -1,9 +1,12 @@
 """Main scraper orchestrator for Naver Finance research reports."""
 
+from __future__ import annotations
+
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 
@@ -16,10 +19,13 @@ from train_data_collector.config import (
     DEFAULT_TOTAL_TARGET,
     REQUEST_TIMEOUT,
 )
-
 from train_data_collector.downloader import PDFDownloader
+from train_data_collector.interfaces import IDownloader, IMetadataManager
 from train_data_collector.metadata import MetadataManager
 from train_data_collector.parser import ReportInfo, get_total_pages, parse_report_list
+
+if TYPE_CHECKING:
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -92,29 +98,50 @@ class CollectionStats:
 
 
 class ReportScraper:
-    """Orchestrates the scraping process for research reports."""
+    """Orchestrates the scraping process for research reports.
 
-    def __init__(self, config: CollectionConfig, data_dir: Path):
+    Supports dependency injection for metadata manager and downloader
+    to enable easier testing and flexibility.
+    """
+
+    def __init__(
+        self,
+        config: CollectionConfig,
+        data_dir: Path,
+        *,
+        metadata_manager: IMetadataManager | None = None,
+        downloader: IDownloader | None = None,
+    ):
         """Initialize the scraper.
 
         Args:
             config: Collection configuration.
             data_dir: Directory to save downloaded PDFs.
+            metadata_manager: Optional metadata manager (injected dependency).
+                If not provided, MetadataManager will be created.
+            downloader: Optional downloader (injected dependency).
+                If not provided, PDFDownloader will be created.
         """
         self.config = config
         self.data_dir = Path(data_dir)
         self._client = httpx.Client(headers=DEFAULT_HEADERS, timeout=REQUEST_TIMEOUT)
-        self._downloader: PDFDownloader | None = None
-        self._metadata: MetadataManager | None = None
+        self._downloader: IDownloader | None = downloader
+        self._metadata: IMetadataManager | None = metadata_manager
+        self._owns_downloader = downloader is None  # Track if we created the downloader
+        self._owns_metadata = metadata_manager is None  # Track if we created the metadata
         self._session_downloaded_urls: set[str] = set()  # Track URLs in current session
 
     def __enter__(self):
-        self._metadata = MetadataManager(self.data_dir)
-        self._downloader = PDFDownloader(
-            base_dir=self.data_dir,
-            delay_range=self.config.delay_range,
-            metadata_manager=self._metadata,
-        )
+        # Create default dependencies if not injected
+        if self._metadata is None:
+            self._metadata = MetadataManager(self.data_dir)
+
+        if self._downloader is None:
+            self._downloader = PDFDownloader(
+                base_dir=self.data_dir,
+                delay_range=self.config.delay_range,
+                metadata_manager=self._metadata,
+            )
 
         # Log existing metadata stats
         existing_count = self._metadata.get_total_count()
@@ -132,11 +159,15 @@ class ReportScraper:
         self.close()
 
     def close(self) -> None:
-        """Close HTTP client and downloader, save metadata."""
+        """Close HTTP client and downloader, save metadata.
+
+        Only closes resources that were created by this instance,
+        not those that were injected.
+        """
         self._client.close()
-        if self._downloader:
+        if self._downloader and self._owns_downloader:
             self._downloader.close()
-        if self._metadata:
+        if self._metadata and self._owns_metadata:
             self._metadata.save()
             logger.info("메타데이터 저장 완료")
 
