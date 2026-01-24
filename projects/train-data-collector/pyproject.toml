@@ -22,9 +22,12 @@ dev = [
 
 [tool.pytest.ini_options]
 markers = [
+    "unit: marks tests as unit tests (isolated, no external dependencies)",
+    "integration: marks tests as integration tests (may use external services)",
     "e2e: marks tests as end-to-end (may access external services)",
 ]
 pythonpath = ["src"]
+testpaths = ["tests"]
 
 [build-system]
 requires = ["hatchling"]
