@@ -331,6 +331,7 @@ dependencies = [
     { name = "intervaltree" },
     { name = "opencv-contrib-python-headless" },
     { name = "pdf2image" },
+    { name = "pillow" },
     { name = "pypdf" },
     { name = "rich" },
 ]
@@ -348,6 +349,7 @@ requires-dist = [
     { name = "intervaltree", specifier = ">=3.1.0" },
     { name = "opencv-contrib-python-headless", specifier = ">=4.0.0" },
     { name = "pdf2image", specifier = ">=1.16.0" },
+    { name = "pillow", specifier = ">=11.3.0" },
     { name = "pypdf", specifier = ">=5.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
 ]
