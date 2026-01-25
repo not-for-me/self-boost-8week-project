@@ -13,6 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+import click
 from PIL import Image, ImageDraw
 from rich.console import Console
 
@@ -131,8 +132,9 @@ def visualize_tables_on_pdf(
         draw.rectangle([0, 0, 250, 25], fill=(0, 0, 0))
         draw.text((5, 5), info_text, fill=(255, 255, 255))
 
-        # 결과 저장 (debug_ 접두사)
-        debug_path = output_dir / f"debug_page_{page_num:03d}.png"
+        # 결과 저장 (증권사명_PDF파일명_페이지번호 형식)
+        broker_name = pdf_path.parent.name
+        debug_path = output_dir / f"{broker_name}_{pdf_path.stem}_page_{page_num:03d}.png"
         img.save(debug_path)
         output_paths.append(debug_path)
 
@@ -144,23 +146,36 @@ def visualize_tables_on_pdf(
     return output_paths
 
 
-def main():
+@click.command()
+@click.argument("pdf_path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "-o", "--output-dir",
+    type=click.Path(path_type=Path),
+    default=Path("./debug_output"),
+    help="디버그 이미지 저장 경로",
+)
+@click.option(
+    "-p", "--pages",
+    type=str,
+    required=True,
+    help="처리할 페이지 번호 (쉼표 구분, 예: 1,2,3)",
+)
+def main(pdf_path: Path, output_dir: Path, pages: str):
+    """PDF 테이블 탐지 결과를 시각화하여 bbox를 검증합니다."""
     console = Console()
 
-    # 설정
-    sample_pdf = Path("../../data/iM증권/2025-12-09_01.pdf")
-    output_dir = Path("./debug_output")
-    pages = [14, 15]
+    # 페이지 번호 파싱
+    page_list = [int(p.strip()) for p in pages.split(",")]
 
-    if not sample_pdf.exists():
-        console.print(f"[red]PDF not found: {sample_pdf}[/red]")
+    if not pdf_path.exists():
+        console.print(f"[red]PDF not found: {pdf_path}[/red]")
         return
 
-    console.print(f"[cyan]Processing: {sample_pdf}[/cyan]")
+    console.print(f"[cyan]Processing: {pdf_path}[/cyan]")
 
     # 테이블 탐지
     ensemble = EnsembleDetector(detectors=[DoclingDetector()])
-    table_candidates = ensemble.detect_all_tables(sample_pdf, pages)
+    table_candidates = ensemble.detect_all_tables(pdf_path, page_list)
 
     console.print(f"\n[green]Detected {len(table_candidates)} table candidates[/green]")
 
@@ -176,7 +191,7 @@ def main():
     # 시각화
     console.print(f"\n[cyan]Generating visualizations...[/cyan]")
     output_paths = visualize_tables_on_pdf(
-        sample_pdf, table_candidates, output_dir, pages, dpi=150
+        pdf_path, table_candidates, output_dir, page_list, dpi=150
     )
 
     console.print(f"\n[green]Saved {len(output_paths)} debug images:[/green]")
