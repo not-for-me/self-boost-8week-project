@@ -1,128 +1,164 @@
-"""PDF analysis core logic using pdfplumber."""
+"""PDF analysis core logic using Docling."""
 
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import pdfplumber
+
+@dataclass
+class BBox:
+    """Bounding box coordinates (PDF coordinate system).
+
+    Attributes:
+        x0: Left x coordinate
+        y0: Top y coordinate
+        x1: Right x coordinate
+        y1: Bottom y coordinate
+    """
+
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+    @property
+    def width(self) -> float:
+        """Width of the bounding box."""
+        return self.x1 - self.x0
+
+    @property
+    def height(self) -> float:
+        """Height of the bounding box."""
+        return self.y1 - self.y0
+
+    @property
+    def area(self) -> float:
+        """Area of the bounding box."""
+        return self.width * self.height
+
+    @property
+    def top(self) -> float:
+        """Top y coordinate (alias for y0)."""
+        return self.y0
+
+    @property
+    def bottom(self) -> float:
+        """Bottom y coordinate (alias for y1)."""
+        return self.y1
+
+    def intersection(self, other: "BBox") -> "BBox | None":
+        """Calculate the intersection of two bounding boxes.
+
+        Args:
+            other: The other bounding box to intersect with.
+
+        Returns:
+            New BBox representing the intersection, or None if no overlap.
+        """
+        x0 = max(self.x0, other.x0)
+        y0 = max(self.y0, other.y0)
+        x1 = min(self.x1, other.x1)
+        y1 = min(self.y1, other.y1)
+
+        if x0 < x1 and y0 < y1:
+            return BBox(x0=x0, y0=y0, x1=x1, y1=y1)
+        return None
+
+    def intersection_ratio(self, other: "BBox") -> float:
+        """Calculate what fraction of this bbox is inside the other bbox.
+
+        Args:
+            other: The container bounding box to check against.
+
+        Returns:
+            Float between 0.0 and 1.0 representing the overlap ratio.
+        """
+        if self.area == 0:
+            return 0.0
+
+        intersection_bbox = self.intersection(other)
+        if intersection_bbox is None:
+            return 0.0
+
+        return intersection_bbox.area / self.area
+
+    def is_mostly_inside(self, other: "BBox", threshold: float = 0.5) -> bool:
+        """Check if this bbox is mostly (>threshold) inside another bbox.
+
+        Args:
+            other: The container bounding box to check against.
+            threshold: Minimum overlap ratio to be considered "inside".
+                       Default 0.5 means more than half the area must overlap.
+
+        Returns:
+            True if this bbox overlaps the other by more than threshold.
+        """
+        return self.intersection_ratio(other) > threshold
 
 
 @dataclass
-class CharInfo:
-    """Information about a single character in PDF."""
+class TextBlock:
+    """A text block/paragraph extracted from PDF.
+
+    Attributes:
+        text: The text content
+        bbox: Bounding box of the text block
+        label: Document label (e.g., 'text', 'title', 'section_header')
+        in_table: Whether this text block is inside a table region
+    """
 
     text: str
-    x0: float
-    top: float
-    x1: float
-    bottom: float
-    font_name: str | None
-    font_size: float | None
-
-    @classmethod
-    def from_pdfplumber(cls, char: dict[str, Any]) -> "CharInfo":
-        """Create CharInfo from pdfplumber char dict."""
-        return cls(
-            text=char.get("text", ""),
-            x0=char.get("x0", 0.0),
-            top=char.get("top", 0.0),
-            x1=char.get("x1", 0.0),
-            bottom=char.get("bottom", 0.0),
-            font_name=char.get("fontname"),
-            font_size=char.get("size"),
-        )
-
-
-@dataclass
-class LineInfo:
-    """Information about a line object in PDF."""
-
-    x0: float
-    top: float
-    x1: float
-    bottom: float
-    width: float | None
-    stroke_color: Any | None
-
-    @property
-    def is_horizontal(self) -> bool:
-        """Check if line is horizontal (within 1pt tolerance)."""
-        return abs(self.top - self.bottom) < 1.0
-
-    @property
-    def is_vertical(self) -> bool:
-        """Check if line is vertical (within 1pt tolerance)."""
-        return abs(self.x0 - self.x1) < 1.0
-
-    @classmethod
-    def from_pdfplumber(cls, line: dict[str, Any]) -> "LineInfo":
-        """Create LineInfo from pdfplumber line dict."""
-        return cls(
-            x0=line.get("x0", 0.0),
-            top=line.get("top", 0.0),
-            x1=line.get("x1", 0.0),
-            bottom=line.get("bottom", 0.0),
-            width=line.get("linewidth") or line.get("width"),
-            stroke_color=line.get("stroking_color"),
-        )
-
-
-@dataclass
-class RectInfo:
-    """Information about a rectangle object in PDF."""
-
-    x0: float
-    top: float
-    x1: float
-    bottom: float
-    width: float
-    height: float
-    stroke_color: Any | None
-    fill_color: Any | None
-
-    @classmethod
-    def from_pdfplumber(cls, rect: dict[str, Any]) -> "RectInfo":
-        """Create RectInfo from pdfplumber rect dict."""
-        x0 = rect.get("x0", 0.0)
-        top = rect.get("top", 0.0)
-        x1 = rect.get("x1", 0.0)
-        bottom = rect.get("bottom", 0.0)
-        return cls(
-            x0=x0,
-            top=top,
-            x1=x1,
-            bottom=bottom,
-            width=x1 - x0,
-            height=bottom - top,
-            stroke_color=rect.get("stroking_color"),
-            fill_color=rect.get("non_stroking_color"),
-        )
+    bbox: BBox
+    label: str = "text"
+    in_table: bool = False
 
 
 @dataclass
 class ImageInfo:
     """Information about an embedded image in PDF."""
 
-    x0: float
-    top: float
-    x1: float
-    bottom: float
-    width: float
-    height: float
-    name: str | None
+    bbox: BBox
+    caption: str | None = None
+
+    @property
+    def x0(self) -> float:
+        """Left x coordinate."""
+        return self.bbox.x0
+
+    @property
+    def top(self) -> float:
+        """Top y coordinate."""
+        return self.bbox.y0
+
+    @property
+    def x1(self) -> float:
+        """Right x coordinate."""
+        return self.bbox.x1
+
+    @property
+    def bottom(self) -> float:
+        """Bottom y coordinate."""
+        return self.bbox.y1
+
+    @property
+    def width(self) -> float:
+        """Image width in points."""
+        return self.bbox.width
+
+    @property
+    def height(self) -> float:
+        """Image height in points."""
+        return self.bbox.height
 
     @classmethod
-    def from_pdfplumber(cls, img: dict[str, Any]) -> "ImageInfo":
-        """Create ImageInfo from pdfplumber image dict."""
-        return cls(
-            x0=img.get("x0", 0.0),
-            top=img.get("top", 0.0),
-            x1=img.get("x1", 0.0),
-            bottom=img.get("bottom", 0.0),
-            width=img.get("width", 0.0),
-            height=img.get("height", 0.0),
-            name=img.get("name"),
-        )
+    def from_docling(cls, picture: Any, prov: Any) -> "ImageInfo":
+        """Create ImageInfo from Docling PictureItem."""
+        bbox_data = prov.bbox
+        x0, x1 = min(bbox_data.l, bbox_data.r), max(bbox_data.l, bbox_data.r)
+        y0, y1 = min(bbox_data.t, bbox_data.b), max(bbox_data.t, bbox_data.b)
+        bbox = BBox(x0=x0, y0=y0, x1=x1, y1=y1)
+        caption = getattr(picture, "caption_text", None)
+        return cls(bbox=bbox, caption=caption)
 
 
 @dataclass
@@ -131,40 +167,75 @@ class TableInfo:
 
     page_number: int
     table_index: int
-    bbox: tuple[float, float, float, float]  # (x0, top, x1, bottom)
+    bbox: BBox
     row_count: int
     col_count: int
-    cells: list[list[str | None]]  # 2D array of cell contents
+    cells: list[list[str | None]]
 
     @property
     def x0(self) -> float:
         """Left x coordinate."""
-        return self.bbox[0]
+        return self.bbox.x0
 
     @property
     def top(self) -> float:
         """Top y coordinate."""
-        return self.bbox[1]
+        return self.bbox.y0
 
     @property
     def x1(self) -> float:
         """Right x coordinate."""
-        return self.bbox[2]
+        return self.bbox.x1
 
     @property
     def bottom(self) -> float:
         """Bottom y coordinate."""
-        return self.bbox[3]
+        return self.bbox.y1
 
     @property
     def width(self) -> float:
         """Table width in points."""
-        return self.bbox[2] - self.bbox[0]
+        return self.bbox.width
 
     @property
     def height(self) -> float:
         """Table height in points."""
-        return self.bbox[3] - self.bbox[1]
+        return self.bbox.height
+
+    @classmethod
+    def from_docling(
+        cls,
+        table: Any,
+        doc: Any,
+        page_no: int,
+        index: int,
+    ) -> "TableInfo":
+        """Create TableInfo from Docling TableItem."""
+        prov = table.prov[0]
+        bbox_data = prov.bbox
+        x0, x1 = min(bbox_data.l, bbox_data.r), max(bbox_data.l, bbox_data.r)
+        y0, y1 = min(bbox_data.t, bbox_data.b), max(bbox_data.t, bbox_data.b)
+        bbox = BBox(x0=x0, y0=y0, x1=x1, y1=y1)
+
+        try:
+            df = table.export_to_dataframe(doc=doc)
+            cells = [list(row) for row in df.values]
+            cells.insert(0, list(df.columns))
+            row_count = len(cells)
+            col_count = len(df.columns) if len(df.columns) > 0 else 0
+        except Exception:
+            cells = []
+            row_count = 0
+            col_count = 0
+
+        return cls(
+            page_number=page_no,
+            table_index=index,
+            bbox=bbox,
+            row_count=row_count,
+            col_count=col_count,
+            cells=cells,
+        )
 
 
 @dataclass
@@ -174,58 +245,29 @@ class PageAnalysis:
     page_number: int
     width: float
     height: float
-    chars: list[CharInfo] = field(default_factory=list)
-    lines: list[LineInfo] = field(default_factory=list)
-    rects: list[RectInfo] = field(default_factory=list)
+    text_blocks: list[TextBlock] = field(default_factory=list)
     images: list[ImageInfo] = field(default_factory=list)
 
     @property
-    def char_count(self) -> int:
-        """Total number of characters."""
-        return len(self.chars)
-
-    @property
-    def word_count(self) -> int:
-        """Estimated word count (non-space characters / 5)."""
-        non_space = sum(1 for c in self.chars if c.text.strip())
-        return max(1, non_space // 5) if non_space > 0 else 0
-
-    @property
-    def line_count(self) -> int:
-        """Total number of line objects."""
-        return len(self.lines)
-
-    @property
-    def horizontal_lines(self) -> int:
-        """Count of horizontal lines."""
-        return sum(1 for line in self.lines if line.is_horizontal)
-
-    @property
-    def vertical_lines(self) -> int:
-        """Count of vertical lines."""
-        return sum(1 for line in self.lines if line.is_vertical)
-
-    @property
-    def rect_count(self) -> int:
-        """Total number of rectangles."""
-        return len(self.rects)
+    def text_block_count(self) -> int:
+        """Total number of text blocks."""
+        return len(self.text_blocks)
 
     @property
     def image_count(self) -> int:
         """Total number of images."""
         return len(self.images)
 
-    def get_font_usage(self) -> dict[str, int]:
-        """Get font usage statistics.
+    @property
+    def total_text_length(self) -> int:
+        """Total characters across all text blocks."""
+        return sum(len(tb.text) for tb in self.text_blocks)
 
-        Returns:
-            Dictionary mapping font name to character count.
-        """
-        font_counts: dict[str, int] = {}
-        for char in self.chars:
-            font = char.font_name or "Unknown"
-            font_counts[font] = font_counts.get(font, 0) + 1
-        return dict(sorted(font_counts.items(), key=lambda x: -x[1]))
+    @property
+    def word_count(self) -> int:
+        """Estimated word count."""
+        total_text = " ".join(tb.text for tb in self.text_blocks)
+        return len(total_text.split())
 
 
 @dataclass
@@ -239,21 +281,6 @@ class DocumentMetadata:
     producer: str | None = None
     creation_date: str | None = None
     mod_date: str | None = None
-
-    @classmethod
-    def from_pdfplumber(cls, metadata: dict[str, Any] | None) -> "DocumentMetadata":
-        """Create DocumentMetadata from pdfplumber metadata."""
-        if not metadata:
-            return cls()
-        return cls(
-            title=metadata.get("Title"),
-            author=metadata.get("Author"),
-            subject=metadata.get("Subject"),
-            creator=metadata.get("Creator"),
-            producer=metadata.get("Producer"),
-            creation_date=metadata.get("CreationDate"),
-            mod_date=metadata.get("ModDate"),
-        )
 
 
 @dataclass
@@ -278,13 +305,14 @@ class DocumentInfo:
 
 
 class PDFAnalyzer:
-    """PDF structure analyzer."""
+    """PDF structure analyzer using Docling."""
 
-    def __init__(self, pdf_path: str | Path):
+    def __init__(self, pdf_path: str | Path, force_ocr: bool = False):
         """Initialize analyzer with PDF path.
 
         Args:
             pdf_path: Path to PDF file.
+            force_ocr: Force full page OCR (for scanned PDFs).
 
         Raises:
             FileNotFoundError: If PDF file does not exist.
@@ -293,6 +321,134 @@ class PDFAnalyzer:
         if not self.pdf_path.exists():
             raise FileNotFoundError(f"PDF file not found: {self.pdf_path}")
 
+        self._converter = None
+        self._doc = None
+        self._force_ocr = force_ocr
+
+    def _get_converter(self) -> Any:
+        """Lazy loading - load Docling converter on first use."""
+        if self._converter is None:
+            try:
+                from docling.datamodel.pipeline_options import (
+                    PdfPipelineOptions,
+                )
+                from docling.document_converter import (
+                    DocumentConverter,
+                    PdfFormatOption,
+                )
+
+                pipeline_options = PdfPipelineOptions(
+                    do_ocr=self._force_ocr,
+                )
+                self._converter = DocumentConverter(
+                    format_options={
+                        "pdf": PdfFormatOption(pipeline_options=pipeline_options),
+                    }
+                )
+            except ImportError as e:
+                raise ImportError(
+                    "docling is not installed. Install with: uv add docling"
+                ) from e
+        return self._converter
+
+    def _get_document(self) -> Any:
+        """Get or convert the document (cached)."""
+        if self._doc is None:
+            converter = self._get_converter()
+            result = converter.convert(str(self.pdf_path))
+            self._doc = result.document
+        return self._doc
+
+    def _get_pages_data(self, doc: Any) -> dict[int, dict[str, Any]]:
+        """Extract per-page data from DoclingDocument."""
+        pages: dict[int, dict[str, Any]] = {}
+
+        # Initialize pages with default dimensions
+        for page_no in range(1, doc.num_pages() + 1):
+            page_obj = doc.pages.get(page_no)
+            if page_obj and hasattr(page_obj, "size") and page_obj.size:
+                width = page_obj.size.width
+                height = page_obj.size.height
+            else:
+                width = 612.0
+                height = 792.0
+
+            pages[page_no] = {
+                "width": width,
+                "height": height,
+                "text_blocks": [],
+                "images": [],
+            }
+
+        # First pass: collect table bboxes per page
+        table_bboxes_by_page: dict[int, list[BBox]] = {}
+        if hasattr(doc, "tables"):
+            for table in doc.tables:
+                if not table.prov:
+                    continue
+                prov = table.prov[0]
+                page_no = prov.page_no
+                if page_no not in table_bboxes_by_page:
+                    table_bboxes_by_page[page_no] = []
+
+                bbox_data = prov.bbox
+                x0, x1 = min(bbox_data.l, bbox_data.r), max(
+                    bbox_data.l, bbox_data.r
+                )
+                y0, y1 = min(bbox_data.t, bbox_data.b), max(
+                    bbox_data.t, bbox_data.b
+                )
+                table_bboxes_by_page[page_no].append(
+                    BBox(x0=x0, y0=y0, x1=x1, y1=y1)
+                )
+
+        # Second pass: iterate through document items for text blocks
+        for item, _level in doc.iterate_items(with_groups=False):
+            if hasattr(item, "text") and hasattr(item, "prov") and item.prov:
+                prov = item.prov[0]
+                page_no = prov.page_no
+                if page_no in pages:
+                    bbox_data = prov.bbox
+                    x0, x1 = min(bbox_data.l, bbox_data.r), max(
+                        bbox_data.l, bbox_data.r
+                    )
+                    y0, y1 = min(bbox_data.t, bbox_data.b), max(
+                        bbox_data.t, bbox_data.b
+                    )
+                    bbox = BBox(x0=x0, y0=y0, x1=x1, y1=y1)
+
+                    label = "text"
+                    if hasattr(item, "label"):
+                        if hasattr(item.label, "value"):
+                            label = item.label.value
+                        else:
+                            label = str(item.label)
+
+                    # Check if text block is inside any table on this page
+                    in_table = False
+                    if page_no in table_bboxes_by_page:
+                        for table_bbox in table_bboxes_by_page[page_no]:
+                            if bbox.is_mostly_inside(table_bbox):
+                                in_table = True
+                                break
+
+                    pages[page_no]["text_blocks"].append(
+                        TextBlock(text=item.text, bbox=bbox, label=label, in_table=in_table)
+                    )
+
+        # Iterate through pictures
+        if hasattr(doc, "pictures"):
+            for pic in doc.pictures:
+                if pic.prov:
+                    prov = pic.prov[0]
+                    page_no = prov.page_no
+                    if page_no in pages:
+                        pages[page_no]["images"].append(
+                            ImageInfo.from_docling(pic, prov)
+                        )
+
+        return pages
+
     def get_document_info(self) -> DocumentInfo:
         """Get document-level information.
 
@@ -300,29 +456,30 @@ class PDFAnalyzer:
             DocumentInfo with metadata and page summaries.
         """
         file_size = self.pdf_path.stat().st_size
+        doc = self._get_document()
 
-        with pdfplumber.open(self.pdf_path) as pdf:
-            metadata = DocumentMetadata.from_pdfplumber(pdf.metadata)
-            page_count = len(pdf.pages)
+        # Docling provides limited metadata
+        metadata = DocumentMetadata()
 
-            # Quick summary of each page
-            page_summaries = []
-            for i, page in enumerate(pdf.pages):
-                summary = {
-                    "page_number": i + 1,
-                    "width": page.width,
-                    "height": page.height,
-                    "char_count": len(page.chars) if page.chars else 0,
-                    "line_count": len(page.lines) if page.lines else 0,
-                    "rect_count": len(page.rects) if page.rects else 0,
-                    "image_count": len(page.images) if page.images else 0,
-                }
-                page_summaries.append(summary)
+        # Build page summaries
+        pages_data = self._get_pages_data(doc)
+        page_summaries = []
+
+        for page_num in sorted(pages_data.keys()):
+            data = pages_data[page_num]
+            summary = {
+                "page_number": page_num,
+                "width": data["width"],
+                "height": data["height"],
+                "text_block_count": len(data["text_blocks"]),
+                "image_count": len(data["images"]),
+            }
+            page_summaries.append(summary)
 
         return DocumentInfo(
             file_path=self.pdf_path,
             file_size_bytes=file_size,
-            page_count=page_count,
+            page_count=doc.num_pages(),
             metadata=metadata,
             page_summaries=page_summaries,
         )
@@ -334,58 +491,28 @@ class PDFAnalyzer:
             page_number: 1-indexed page number.
 
         Returns:
-            PageAnalysis with all page elements.
+            PageAnalysis with text blocks and images.
 
         Raises:
             ValueError: If page number is out of range.
         """
-        with pdfplumber.open(self.pdf_path) as pdf:
-            if page_number < 1 or page_number > len(pdf.pages):
-                raise ValueError(
-                    f"Page {page_number} out of range. "
-                    f"Document has {len(pdf.pages)} pages."
-                )
+        doc = self._get_document()
+        pages_data = self._get_pages_data(doc)
 
-            page = pdf.pages[page_number - 1]
-
-            chars = [
-                CharInfo.from_pdfplumber(c) for c in (page.chars or [])
-            ]
-            lines = [
-                LineInfo.from_pdfplumber(ln) for ln in (page.lines or [])
-            ]
-            rects = [
-                RectInfo.from_pdfplumber(r) for r in (page.rects or [])
-            ]
-            images = [
-                ImageInfo.from_pdfplumber(img) for img in (page.images or [])
-            ]
-
-            return PageAnalysis(
-                page_number=page_number,
-                width=page.width,
-                height=page.height,
-                chars=chars,
-                lines=lines,
-                rects=rects,
-                images=images,
+        if page_number not in pages_data:
+            raise ValueError(
+                f"Page {page_number} out of range. "
+                f"Document has {doc.num_pages()} pages."
             )
 
-    def get_all_fonts(self) -> dict[str, int]:
-        """Get font usage across entire document.
-
-        Returns:
-            Dictionary mapping font name to total character count.
-        """
-        all_fonts: dict[str, int] = {}
-
-        with pdfplumber.open(self.pdf_path) as pdf:
-            for page in pdf.pages:
-                for char in page.chars or []:
-                    font = char.get("fontname", "Unknown")
-                    all_fonts[font] = all_fonts.get(font, 0) + 1
-
-        return dict(sorted(all_fonts.items(), key=lambda x: -x[1]))
+        data = pages_data[page_number]
+        return PageAnalysis(
+            page_number=page_number,
+            width=data["width"],
+            height=data["height"],
+            text_blocks=data["text_blocks"],
+            images=data["images"],
+        )
 
     def extract_tables(
         self,
@@ -402,53 +529,37 @@ class PDFAnalyzer:
         Raises:
             ValueError: If page number is out of range.
         """
+        doc = self._get_document()
+
+        if page_number is not None and (page_number < 1 or page_number > doc.num_pages()):
+            raise ValueError(
+                f"Page {page_number} out of range. "
+                f"Document has {doc.num_pages()} pages."
+            )
+
         tables: list[TableInfo] = []
+        table_index_by_page: dict[int, int] = {}
 
-        with pdfplumber.open(self.pdf_path) as pdf:
-            if page_number is not None:
-                if page_number < 1 or page_number > len(pdf.pages):
-                    raise ValueError(
-                        f"Page {page_number} out of range. "
-                        f"Document has {len(pdf.pages)} pages."
-                    )
-                pages_to_process = [(page_number, pdf.pages[page_number - 1])]
+        for table in doc.tables:
+            if not table.prov:
+                continue
+
+            prov = table.prov[0]
+            page_no = prov.page_no
+
+            if page_number is not None and page_no != page_number:
+                continue
+
+            # Track table index per page
+            if page_no not in table_index_by_page:
+                table_index_by_page[page_no] = 0
             else:
-                pages_to_process = [
-                    (i + 1, page) for i, page in enumerate(pdf.pages)
-                ]
+                table_index_by_page[page_no] += 1
 
-            for page_num, page in pages_to_process:
-                page_tables = page.find_tables()
-
-                for table_idx, table in enumerate(page_tables):
-                    # Extract table data
-                    extracted = table.extract()
-                    if not extracted:
-                        continue
-
-                    # Get bounding box
-                    bbox = table.bbox  # (x0, top, x1, bottom)
-
-                    # Count rows and columns
-                    row_count = len(extracted)
-                    col_count = max(len(row) for row in extracted) if extracted else 0
-
-                    # Normalize cells (ensure all rows have same column count)
-                    normalized_cells: list[list[str | None]] = []
-                    for row in extracted:
-                        normalized_row = list(row) + [None] * (col_count - len(row))
-                        normalized_cells.append(normalized_row)
-
-                    tables.append(
-                        TableInfo(
-                            page_number=page_num,
-                            table_index=table_idx,
-                            bbox=bbox,
-                            row_count=row_count,
-                            col_count=col_count,
-                            cells=normalized_cells,
-                        )
-                    )
+            table_info = TableInfo.from_docling(
+                table, doc, page_no, table_index_by_page[page_no]
+            )
+            tables.append(table_info)
 
         return tables
 
@@ -458,14 +569,14 @@ class PDFAnalyzer:
         Returns:
             Dictionary mapping page number to table count.
         """
+        doc = self._get_document()
         summary: dict[int, int] = {}
 
-        with pdfplumber.open(self.pdf_path) as pdf:
-            for i, page in enumerate(pdf.pages):
-                page_num = i + 1
-                table_count = len(page.find_tables())
-                if table_count > 0:
-                    summary[page_num] = table_count
+        for table in doc.tables:
+            if not table.prov:
+                continue
+            page_no = table.prov[0].page_no
+            summary[page_no] = summary.get(page_no, 0) + 1
 
         return summary
 
@@ -476,22 +587,20 @@ class PDFStats:
 
     file_path: Path
     page_count: int
-    total_chars: int
-    total_lines: int
+    total_text_blocks: int
     total_images: int
     total_tables: int
-    page_sizes: list[tuple[float, float]]  # List of (width, height)
-    fonts: dict[str, int]
+    page_sizes: list[tuple[float, float]]
 
     @property
-    def avg_chars_per_page(self) -> float:
-        """Average characters per page."""
-        return self.total_chars / self.page_count if self.page_count > 0 else 0
+    def avg_text_blocks_per_page(self) -> float:
+        """Average text blocks per page."""
+        return self.total_text_blocks / self.page_count if self.page_count > 0 else 0
 
     @property
-    def avg_lines_per_page(self) -> float:
-        """Average lines per page."""
-        return self.total_lines / self.page_count if self.page_count > 0 else 0
+    def avg_images_per_page(self) -> float:
+        """Average images per page."""
+        return self.total_images / self.page_count if self.page_count > 0 else 0
 
 
 @dataclass
@@ -500,13 +609,11 @@ class CollectionStats:
 
     file_count: int
     total_pages: int
-    page_size_distribution: dict[str, int]  # e.g., "A4 Portrait": 120
-    chars_stats: dict[str, float]  # min, max, avg, median
-    lines_stats: dict[str, float]
+    page_size_distribution: dict[str, int]
+    text_blocks_stats: dict[str, float]
     images_stats: dict[str, float]
     tables_stats: dict[str, float]
-    font_usage: dict[str, int]  # font name -> file count
-    errors: list[tuple[Path, str]]  # Files that failed to process
+    errors: list[tuple[Path, str]]
 
 
 def analyze_single_pdf(pdf_path: Path) -> PDFStats:
@@ -519,49 +626,35 @@ def analyze_single_pdf(pdf_path: Path) -> PDFStats:
         PDFStats object with file statistics.
     """
     analyzer = PDFAnalyzer(pdf_path)
+    doc_info = analyzer.get_document_info()
 
-    total_chars = 0
-    total_lines = 0
+    total_text_blocks = 0
     total_images = 0
     page_sizes = []
-    all_fonts: dict[str, int] = {}
 
-    with pdfplumber.open(pdf_path) as pdf:
-        page_count = len(pdf.pages)
+    for summary in doc_info.page_summaries:
+        total_text_blocks += summary.get("text_block_count", 0)
+        total_images += summary.get("image_count", 0)
+        page_sizes.append((summary["width"], summary["height"]))
 
-        for page in pdf.pages:
-            total_chars += len(page.chars) if page.chars else 0
-            total_lines += len(page.lines) if page.lines else 0
-            total_images += len(page.images) if page.images else 0
-            page_sizes.append((page.width, page.height))
-
-            for char in page.chars or []:
-                font = char.get("fontname", "Unknown")
-                all_fonts[font] = all_fonts.get(font, 0) + 1
-
-    # Count tables
     total_tables = sum(analyzer.get_table_summary().values())
 
     return PDFStats(
         file_path=pdf_path,
-        page_count=page_count,
-        total_chars=total_chars,
-        total_lines=total_lines,
+        page_count=doc_info.page_count,
+        total_text_blocks=total_text_blocks,
         total_images=total_images,
         total_tables=total_tables,
         page_sizes=page_sizes,
-        fonts=all_fonts,
     )
 
 
 def _classify_page_size(width: float, height: float) -> str:
     """Classify page size into common formats."""
-    # A4: 595 x 842 pt (with some tolerance)
     if abs(width - 595) < 10 and abs(height - 842) < 10:
         return "A4 Portrait"
     elif abs(width - 842) < 10 and abs(height - 595) < 10:
         return "A4 Landscape"
-    # Letter: 612 x 792 pt
     elif abs(width - 612) < 10 and abs(height - 792) < 10:
         return "Letter Portrait"
     elif abs(width - 792) < 10 and abs(height - 612) < 10:
@@ -582,8 +675,11 @@ def _calculate_stats(values: list[float]) -> dict[str, float]:
         "min": min(values),
         "max": max(values),
         "avg": sum(values) / n,
-        "median": sorted_values[n // 2] if n % 2 == 1
-        else (sorted_values[n // 2 - 1] + sorted_values[n // 2]) / 2,
+        "median": (
+            sorted_values[n // 2]
+            if n % 2 == 1
+            else (sorted_values[n // 2 - 1] + sorted_values[n // 2]) / 2
+        ),
     }
 
 
@@ -620,11 +716,9 @@ def analyze_collection(
             file_count=0,
             total_pages=0,
             page_size_distribution={},
-            chars_stats={"min": 0, "max": 0, "avg": 0, "median": 0},
-            lines_stats={"min": 0, "max": 0, "avg": 0, "median": 0},
+            text_blocks_stats={"min": 0, "max": 0, "avg": 0, "median": 0},
             images_stats={"min": 0, "max": 0, "avg": 0, "median": 0},
             tables_stats={"min": 0, "max": 0, "avg": 0, "median": 0},
-            font_usage={},
             errors=errors,
         )
 
@@ -636,37 +730,22 @@ def analyze_collection(
             page_size_dist[size_name] = page_size_dist.get(size_name, 0) + 1
 
     # Calculate per-page statistics
-    chars_per_page = []
-    lines_per_page = []
+    text_blocks_per_page = []
     images_per_page = []
     tables_per_file = []
 
     for stats in all_stats:
         if stats.page_count > 0:
-            chars_per_page.append(stats.total_chars / stats.page_count)
-            lines_per_page.append(stats.total_lines / stats.page_count)
+            text_blocks_per_page.append(stats.total_text_blocks / stats.page_count)
             images_per_page.append(stats.total_images / stats.page_count)
         tables_per_file.append(stats.total_tables)
-
-    # Aggregate font usage (count files using each font)
-    font_file_count: dict[str, int] = {}
-    for stats in all_stats:
-        for font in stats.fonts.keys():
-            font_file_count[font] = font_file_count.get(font, 0) + 1
-
-    # Sort by usage
-    font_file_count = dict(
-        sorted(font_file_count.items(), key=lambda x: -x[1])
-    )
 
     return CollectionStats(
         file_count=len(all_stats),
         total_pages=sum(s.page_count for s in all_stats),
         page_size_distribution=page_size_dist,
-        chars_stats=_calculate_stats(chars_per_page),
-        lines_stats=_calculate_stats(lines_per_page),
+        text_blocks_stats=_calculate_stats(text_blocks_per_page),
         images_stats=_calculate_stats(images_per_page),
         tables_stats=_calculate_stats(tables_per_file),
-        font_usage=font_file_count,
         errors=errors,
     )

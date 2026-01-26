@@ -12,7 +12,6 @@ class VisualConfig:
     width: int = 60  # Terminal width for visualization
     height: int = 40  # Terminal height for visualization
     show_text: bool = True
-    show_lines: bool = True
     show_tables: bool = True
     show_images: bool = True
 
@@ -22,13 +21,12 @@ class ASCIIVisualizer:
 
     # Characters for different elements
     CHAR_EMPTY = " "
-    CHAR_TEXT = "\u2591"  # Light shade (░) - lighter than image
-    CHAR_LINE_H = "\u2550"  # Double horizontal
-    CHAR_LINE_V = "\u2551"  # Double vertical
+    CHAR_TEXT = "\u2591"  # Light shade - regular text
+    CHAR_TABLE_TEXT = "\u2592"  # Medium shade - text inside table
     CHAR_TABLE_CORNER = "\u256c"  # Double cross
     CHAR_TABLE_H = "\u2500"  # Light horizontal
     CHAR_TABLE_V = "\u2502"  # Light vertical
-    CHAR_IMAGE = "\u2588"  # Full block (█) - solid for images
+    CHAR_IMAGE = "\u2588"  # Full block - solid for images
 
     def __init__(self, config: VisualConfig | None = None):
         """Initialize visualizer with config.
@@ -66,11 +64,8 @@ class ASCIIVisualizer:
         if self.config.show_text:
             self._draw_text_regions(grid, analysis, scale_x, scale_y)
 
-        if self.config.show_lines:
-            self._draw_lines(grid, analysis, scale_x, scale_y)
-
         if self.config.show_tables and tables:
-            self._draw_tables(grid, tables, scale_x, scale_y)
+            self._draw_tables(grid, tables, scale_x, scale_y, analysis.height)
 
         if self.config.show_images:
             self._draw_images(grid, analysis, scale_x, scale_y)
@@ -85,27 +80,16 @@ class ASCIIVisualizer:
         scale_x: float,
         scale_y: float,
     ) -> None:
-        """Draw text regions on grid."""
-        for char in analysis.chars:
-            x = int(char.x0 * scale_x)
-            y = int(char.top * scale_y)
+        """Draw text block regions on grid."""
+        page_height = analysis.height
 
-            if 0 <= x < self.config.width and 0 <= y < self.config.height:
-                grid[y][x] = self.CHAR_TEXT
-
-    def _draw_lines(
-        self,
-        grid: list[list[str]],
-        analysis: PageAnalysis,
-        scale_x: float,
-        scale_y: float,
-    ) -> None:
-        """Draw line objects on grid."""
-        for line in analysis.lines:
-            x0 = int(line.x0 * scale_x)
-            y0 = int(line.top * scale_y)
-            x1 = int(line.x1 * scale_x)
-            y1 = int(line.bottom * scale_y)
+        for block in analysis.text_blocks:
+            x0 = int(block.bbox.x0 * scale_x)
+            x1 = int(block.bbox.x1 * scale_x)
+            # Convert PDF coordinates (y increases upward) to screen coordinates
+            # (y increases downward): screen_y = page_height - pdf_y
+            y0 = int((page_height - block.bbox.y1) * scale_y)
+            y1 = int((page_height - block.bbox.y0) * scale_y)
 
             # Clamp to grid bounds
             x0 = max(0, min(x0, self.config.width - 1))
@@ -113,16 +97,13 @@ class ASCIIVisualizer:
             y0 = max(0, min(y0, self.config.height - 1))
             y1 = max(0, min(y1, self.config.height - 1))
 
-            if line.is_horizontal:
-                # Draw horizontal line
-                for x in range(min(x0, x1), max(x0, x1) + 1):
-                    if 0 <= x < self.config.width:
-                        grid[y0][x] = self.CHAR_LINE_H
-            elif line.is_vertical:
-                # Draw vertical line
-                for y in range(min(y0, y1), max(y0, y1) + 1):
-                    if 0 <= y < self.config.height:
-                        grid[y][x0] = self.CHAR_LINE_V
+            # Choose character based on in_table flag
+            char = self.CHAR_TABLE_TEXT if block.in_table else self.CHAR_TEXT
+
+            # Fill text block area
+            for y in range(y0, y1 + 1):
+                for x in range(x0, x1 + 1):
+                    grid[y][x] = char
 
     def _draw_tables(
         self,
@@ -130,13 +111,15 @@ class ASCIIVisualizer:
         tables: list[TableInfo],
         scale_x: float,
         scale_y: float,
+        page_height: float,
     ) -> None:
         """Draw table boundaries on grid."""
         for table in tables:
             x0 = int(table.x0 * scale_x)
-            y0 = int(table.top * scale_y)
             x1 = int(table.x1 * scale_x)
-            y1 = int(table.bottom * scale_y)
+            # Convert PDF coordinates to screen coordinates
+            y0 = int((page_height - table.bottom) * scale_y)
+            y1 = int((page_height - table.top) * scale_y)
 
             # Clamp to grid bounds
             x0 = max(0, min(x0, self.config.width - 1))
@@ -175,11 +158,14 @@ class ASCIIVisualizer:
         scale_y: float,
     ) -> None:
         """Draw image placeholders on grid."""
+        page_height = analysis.height
+
         for img in analysis.images:
             x0 = int(img.x0 * scale_x)
-            y0 = int(img.top * scale_y)
             x1 = int(img.x1 * scale_x)
-            y1 = int(img.bottom * scale_y)
+            # Convert PDF coordinates to screen coordinates
+            y0 = int((page_height - img.bottom) * scale_y)
+            y1 = int((page_height - img.top) * scale_y)
 
             # Clamp to grid bounds
             x0 = max(0, min(x0, self.config.width - 1))
@@ -215,7 +201,12 @@ class ASCIIVisualizer:
         # Legend
         lines.append("")
         lines.append("Legend:")
-        lines.append(f"  {self.CHAR_TEXT} = Text    {self.CHAR_LINE_H}/{self.CHAR_LINE_V} = Lines    {self.CHAR_TABLE_H}{self.CHAR_TABLE_V} = Table    {self.CHAR_IMAGE} = Image")
+        lines.append(
+            f"  {self.CHAR_TEXT} = Text    "
+            f"{self.CHAR_TABLE_TEXT} = Table Text    "
+            f"{self.CHAR_TABLE_H}{self.CHAR_TABLE_V} = Table    "
+            f"{self.CHAR_IMAGE} = Image"
+        )
 
         return "\n".join(lines)
 

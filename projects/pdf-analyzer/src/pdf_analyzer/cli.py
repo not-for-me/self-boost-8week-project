@@ -25,7 +25,8 @@ def cli():
     """PDF Analyzer - Understand PDF structure under the hood.
 
     This tool helps you analyze PDF files by extracting and displaying
-    their internal elements: characters, lines, rectangles, and images.
+    their internal elements: text blocks, tables, and images.
+    Powered by Docling for ML-based document understanding.
     """
     pass
 
@@ -62,7 +63,7 @@ def info(pdf_file: Path):
 )
 @click.option(
     "--element", "-e",
-    type=click.Choice(["chars", "lines", "rects", "images"]),
+    type=click.Choice(["text", "images"]),
     default=None,
     help="Specific element type to display. Default: show summary",
 )
@@ -80,8 +81,8 @@ def page(pdf_file: Path, page: int, element: str | None, limit: int):
     Examples:
         uv run pdf-analyzer page sample.pdf
         uv run pdf-analyzer page sample.pdf --page 2
-        uv run pdf-analyzer page sample.pdf -p 1 --element chars
-        uv run pdf-analyzer page sample.pdf -p 1 -e lines --limit 50
+        uv run pdf-analyzer page sample.pdf -p 1 --element text
+        uv run pdf-analyzer page sample.pdf -p 1 -e images --limit 50
     """
     try:
         analyzer = PDFAnalyzer(pdf_file)

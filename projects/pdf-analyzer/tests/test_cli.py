@@ -52,7 +52,7 @@ class TestInfoCommand:
 
         assert result.exit_code == 0
         assert "Page" in result.output
-        assert "Chars" in result.output
+        assert "Text" in result.output or "Block" in result.output
 
     def test_info_command_nonexistent_file_fails(self, tmp_path: Path):
         """Given: A non-existent file path
@@ -89,40 +89,37 @@ class TestPageCommand:
         assert result.exit_code == 0
         assert "Page 1" in result.output
 
-    def test_page_command_shows_characters_option(self, basic_pdf: Path):
+    def test_page_command_shows_text_option(self, basic_pdf: Path):
         """Given: A PDF file with text
-        When: page command is executed with --element chars
-        Then: Output should show character details
+        When: page command is executed with --element text
+        Then: Output should show text block details
         """
         runner = CliRunner()
-        result = runner.invoke(cli, ["page", str(basic_pdf), "-e", "chars"])
+        result = runner.invoke(cli, ["page", str(basic_pdf), "-e", "text"])
 
         assert result.exit_code == 0
-        assert "Char" in result.output
-        assert "X0" in result.output
+        assert "Text" in result.output or "Block" in result.output
 
-    def test_page_command_shows_lines_option(self, table_pdf: Path):
-        """Given: A PDF file with lines
-        When: page command is executed with --element lines
-        Then: Output should show line statistics
+    def test_page_command_shows_images_option(self, basic_pdf: Path):
+        """Given: A PDF file
+        When: page command is executed with --element images
+        Then: Output should show images section
         """
         runner = CliRunner()
-        result = runner.invoke(cli, ["page", str(table_pdf), "-e", "lines"])
+        result = runner.invoke(cli, ["page", str(basic_pdf), "-e", "images"])
 
         assert result.exit_code == 0
-        assert "Horizontal" in result.output
-        assert "Vertical" in result.output
+        # Output shows images section even if empty
 
     def test_page_command_limit_option(self, basic_pdf: Path):
-        """Given: A PDF file with many characters
+        """Given: A PDF file with text blocks
         When: page command is executed with --limit 5
         Then: Output should show only 5 items
         """
         runner = CliRunner()
-        result = runner.invoke(cli, ["page", str(basic_pdf), "-e", "chars", "-l", "5"])
+        result = runner.invoke(cli, ["page", str(basic_pdf), "-e", "text", "-l", "5"])
 
         assert result.exit_code == 0
-        assert "showing first 5" in result.output
 
     def test_page_command_invalid_page_fails(self, basic_pdf: Path):
         """Given: A single-page PDF

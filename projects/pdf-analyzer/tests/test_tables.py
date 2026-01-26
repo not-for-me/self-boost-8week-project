@@ -153,7 +153,7 @@ class TestTableInfoProperties:
         tables = analyzer.extract_tables()
 
         table = tables[0]
-        expected_width = table.bbox[2] - table.bbox[0]
+        expected_width = table.bbox.x1 - table.bbox.x0
         assert table.width == expected_width
 
     def test_table_height_property(self, table_pdf: Path):
@@ -165,7 +165,7 @@ class TestTableInfoProperties:
         tables = analyzer.extract_tables()
 
         table = tables[0]
-        expected_height = table.bbox[3] - table.bbox[1]
+        expected_height = table.bbox.y1 - table.bbox.y0
         assert table.height == expected_height
 
 

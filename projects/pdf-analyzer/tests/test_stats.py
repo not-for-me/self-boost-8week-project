@@ -51,8 +51,7 @@ class TestAnalyzeSinglePDF:
         """
         stats = analyze_single_pdf(basic_pdf)
 
-        assert stats.total_chars >= 0
-        assert stats.total_lines >= 0
+        assert stats.total_text_blocks >= 0
         assert stats.total_images >= 0
         assert stats.total_tables >= 0
 
@@ -65,24 +64,15 @@ class TestAnalyzeSinglePDF:
 
         assert len(stats.page_sizes) == stats.page_count
 
-    def test_stats_fonts_is_dict(self, basic_pdf: Path):
-        """Given: A PDF with text
-        When: analyze_single_pdf is called
-        Then: fonts is a dictionary
-        """
-        stats = analyze_single_pdf(basic_pdf)
-
-        assert isinstance(stats.fonts, dict)
-
-    def test_avg_chars_per_page_calculation(self, basic_pdf: Path):
-        """Given: A PDF with known char count
-        When: avg_chars_per_page is accessed
+    def test_avg_text_blocks_per_page_calculation(self, basic_pdf: Path):
+        """Given: A PDF with known text blocks
+        When: avg_text_blocks_per_page is accessed
         Then: Correct average is returned
         """
         stats = analyze_single_pdf(basic_pdf)
 
-        expected = stats.total_chars / stats.page_count
-        assert stats.avg_chars_per_page == expected
+        expected = stats.total_text_blocks / stats.page_count
+        assert stats.avg_text_blocks_per_page == expected
 
 
 class TestAnalyzeCollection:
@@ -139,8 +129,7 @@ class TestAnalyzeCollection:
 
         required_keys = {"min", "max", "avg", "median"}
 
-        assert set(stats.chars_stats.keys()) == required_keys
-        assert set(stats.lines_stats.keys()) == required_keys
+        assert set(stats.text_blocks_stats.keys()) == required_keys
         assert set(stats.images_stats.keys()) == required_keys
         assert set(stats.tables_stats.keys()) == required_keys
 
@@ -232,7 +221,7 @@ class TestStatsCommand:
         result = runner.invoke(cli, ["stats"] + pdf_paths)
 
         assert result.exit_code == 0
-        assert "Characters" in result.output or "Chars" in result.output
+        assert "Text Blocks" in result.output or "text" in result.output.lower()
 
     def test_stats_command_limit_option(self, test_pdfs: dict[str, Path]):
         """Given: Multiple PDF files
